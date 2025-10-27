@@ -30,4 +30,4 @@ set(monero-lws-util_sources blocks.cpp gamma_picker.cpp random_outputs.cpp sourc
 set(monero-lws-util_headers blocks.h fwd.h gamma_picker.h random_outputs.h source_location.h transactions.h)
 
 add_library(monero-lws-util ${monero-lws-util_sources} ${monero-lws-util_headers})
-target_link_libraries(monero-lws-util monero::libraries monero-lws-db)
+target_link_libraries(monero-lws-util monero::libraries monero-lws-db monero-lws-epee)

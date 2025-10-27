@@ -1,0 +1,6 @@
+set(_xcash_version_module "${CMAKE_SOURCE_DIR}/external/monero/cmake/Version.cmake")
+if(EXISTS "${_xcash_version_module}")
+  include("${_xcash_version_module}")
+else()
+  message(FATAL_ERROR "Expected Version.cmake from xcash core not found at ${_xcash_version_module}")
+endif()

@@ -1,0 +1,2 @@
+set(Miniupnpc_FOUND TRUE)
+set(MINIUPNPC_FOUND TRUE)

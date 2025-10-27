@@ -35,8 +35,8 @@
 #include <sodium/utils.h>
 #include <sodium/randombytes.h>
 #include <vector>
-#include "byte_slice.h"    // monero/contrib/epee/include
-#include "byte_stream.h"   // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
+#include "compat/epee/byte_stream.h"
 #include "common/expect.h" // monero/src/
 #include "error.h"
 #include "misc_log_ex.h"        // monero/contrib/epee/include

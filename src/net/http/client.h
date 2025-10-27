@@ -34,7 +34,7 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include "byte_slice.h"    // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
 #include "common/expect.h" // monero/src
 #include "net/net_ssl.h"   // monero/contrib/epee/include
 
@@ -69,4 +69,3 @@ namespace net { namespace http
     expect<void> get_async(boost::asio::io_context& io, std::string url, std::function<server_response_func> notifier);
   };
 }} // net // http
-

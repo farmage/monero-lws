@@ -30,5 +30,9 @@ set(monero-lws-db_sources account.cpp data.cpp storage.cpp string.cpp)
 set(monero-lws-db_headers account.h data.h fwd.h storage.h string.h)
 
 add_library(monero-lws-db ${monero-lws-db_sources} ${monero-lws-db_headers})
+target_include_directories(monero-lws-db
+  PRIVATE
+    "${MONERO_SOURCE_DIR}/contrib/epee/include"
+    "${MONERO_SOURCE_DIR}/src/common")
 target_include_directories(monero-lws-db PUBLIC "${LMDB_INCLUDE}")
-target_link_libraries(monero-lws-db monero::libraries monero-lws-common monero-lws-lmdb monero-lws-wire-msgpack ${LMDB_LIB_PATH})
+target_link_libraries(monero-lws-db monero::libraries monero-lws-common monero-lws-lmdb monero-lws-wire-msgpack monero-lws-epee ${LMDB_LIB_PATH})

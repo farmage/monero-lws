@@ -31,5 +31,8 @@ set(monero-lws-wire_headers variant.h)
 
 add_library(monero-lws-wire-wrapper ${monero-lws-wire_sources} ${monero-lws-wire_headers})
 target_include_directories(monero-lws-wire-wrapper PUBLIC "${LMDB_INCLUDE}")
-target_link_libraries(monero-lws-wire-wrapper PRIVATE monero::libraries)
-
+target_link_libraries(monero-lws-wire-wrapper
+  PUBLIC
+    monero-lws-compat
+  PRIVATE
+    monero::libraries)

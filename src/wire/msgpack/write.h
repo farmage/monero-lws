@@ -33,7 +33,7 @@
 #include <iosfwd>
 #include <limits>
 
-#include "byte_stream.h" // monero/contrib/epee/include
+#include "compat/epee/byte_stream.h"
 #include "span.h"        // monero/contrib/epee/include
 #include "wire/field.h"
 #include "wire/filters.h"

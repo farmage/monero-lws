@@ -34,8 +34,8 @@
 #include <type_traits>
 
 #include "common/expect.h"
-#include "lmdb/error.h"
-#include "lmdb/transaction.h"
+#include "compat/lmdb/error.h"
+#include "compat/lmdb/transaction.h"
 
 namespace lws_lmdb
 {
@@ -139,4 +139,3 @@ namespace lws_lmdb
         }
     };
 } // lws_lmdb
-

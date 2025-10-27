@@ -45,14 +45,19 @@
 #include "common/error.h"                             // monero/src
 #include "config.h"
 #include "crypto/crypto.h"                            // monero/src
+#if __has_include("crypto/wallet/crypto.h")
 #include "crypto/wallet/crypto.h"                     // monero/src
+#endif
+#include "compat/xcash_crypto.h"
+#include "compat/xcash_cryptonote.h"
+#include "compat/xcash_ringct.h"
 #include "cryptonote_basic/cryptonote_basic.h"        // monero/src
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "db/account.h"
 #include "db/data.h"
 #include "cryptonote_basic/difficulty.h"              // monero/src
 #include "error.h"
-#include "hardforks/hardforks.h"   // monero/src
+#include "cryptonote_basic/hardfork.h"   // monero/src
 #include "misc_log_ex.h"           // monero/contrib/epee/include
 #include "net/net_parse_helpers.h"
 #include "net/net_ssl.h"           // monero/contrib/epee/include
@@ -151,30 +156,20 @@ namespace lws
  
     std::size_t get_target_time(db::block_id height)
     {
-      const hardfork_t* fork = nullptr;
       switch (config::network)
       {
       case cryptonote::network_type::MAINNET:
-        if (num_mainnet_hard_forks < 2)
-          MONERO_THROW(error::bad_blockchain, "expected more mainnet forks");
-        fork = mainnet_hard_forks;
-        break;     
+        if (height >= db::block_id(HF_BLOCK_HEIGHT_PROOF_OF_STAKE))
+          return DIFFICULTY_TARGET_V13;
+        if (height >= db::block_id(HF_BLOCK_HEIGHT_TWO_MINUTE_BLOCK_TIME))
+          return DIFFICULTY_TARGET_V12;
+        return DIFFICULTY_TARGET_V2;
       case cryptonote::network_type::TESTNET:
-         if (num_testnet_hard_forks < 2)
-          MONERO_THROW(error::bad_blockchain, "expected more testnet forks");
-        fork = testnet_hard_forks;
-        break; 
       case cryptonote::network_type::STAGENET:
-         if (num_stagenet_hard_forks < 2)
-          MONERO_THROW(error::bad_blockchain, "expected more stagenet forks");
-        fork = stagenet_hard_forks;
-        break;
+        return DIFFICULTY_TARGET_V2;
       default:
-        MONERO_THROW(error::bad_blockchain, "chain type not support with full sync"); 
-      } 
-      // this is hardfork version 2
-      return height < db::block_id(fork[1].height) ?
-        DIFFICULTY_TARGET_V1 : DIFFICULTY_TARGET_V2;
+        return DIFFICULTY_TARGET_V2;
+      }
     }
 
     //! For difficulty vectors only
@@ -182,9 +177,18 @@ namespace lws
     void update_window(T& vec)
     {
       // should only have one to pop each time
-      while (DIFFICULTY_BLOCKS_COUNT < vec.size())
-        vec.erase(vec.begin());
-    };
+    while (DIFFICULTY_BLOCKS_COUNT < vec.size())
+      vec.erase(vec.begin());
+  };
+
+  std::vector<cryptonote::difficulty_type> convert_difficulties(const std::vector<db::block_difficulty::unsigned_int>& source)
+  {
+    std::vector<cryptonote::difficulty_type> result{};
+    result.reserve(source.size());
+    for (const auto& value : source)
+      result.push_back(value.convert_to<cryptonote::difficulty_type>());
+    return result;
+  }
 
     void send_spend_hook(boost::asio::io_context& io, rpc::client& client, net::http::client& http, const epee::span<const db::webhook_tx_spend> events)
     {
@@ -353,7 +357,7 @@ namespace lws
           continue; // to next user
 
         crypto::key_derivation derived;
-        if (!crypto::wallet::generate_key_derivation(key.pub_key, user.view_key(), derived))
+        if (!compat::generate_key_derivation(key.pub_key, user.view_key(), derived))
           continue; // to next user
 
         if (reader.reader && additional_tx_pub_keys.data.size() == tx.vout.size())
@@ -363,7 +367,7 @@ namespace lws
           for (auto const& out: tx.vout)
           {
             ++index;
-            if (!crypto::wallet::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), additional_derivations[index]))
+            if (!compat::generate_key_derivation(additional_tx_pub_keys.data[index], user.view_key(), additional_derivations[index]))
             {
               additional_derivations.clear();
               break; // vout loop
@@ -419,15 +423,12 @@ namespace lws
           ++index;
 
           crypto::public_key out_pub_key;
-          if (!cryptonote::get_output_public_key(out, out_pub_key))
+          if (!compat::get_output_public_key(out, out_pub_key))
             continue; // to next output
 
-          boost::optional<crypto::view_tag> view_tag_opt =
-            cryptonote::get_output_view_tag(out);
-
           const bool found_tag =
-            (!additional_derivations.empty() && cryptonote::out_can_be_to_acc(view_tag_opt, additional_derivations.at(index), index)) ||
-            cryptonote::out_can_be_to_acc(view_tag_opt, derived, index); 
+            (!additional_derivations.empty() && compat::view_tag_matches(out, additional_derivations.at(index), index)) ||
+            compat::view_tag_matches(out, derived, index);
 
           if (!found_tag)
             continue; // to next output
@@ -454,7 +455,7 @@ namespace lws
               break; // inspection loop
 
             crypto::public_key derived_pub;
-            if (!crypto::wallet::derive_subaddress_public_key(out_pub_key, active_derived, index, derived_pub))
+            if (!compat::derive_subaddress_public_key(out_pub_key, active_derived, index, derived_pub))
               continue; // to next available active_derived
 
             if (user.spend_public() != derived_pub)
@@ -494,7 +495,7 @@ namespace lws
           rct::key mask = rct::identity();
           if (!amount && !(ext & db::coinbase_output) && 1 < tx.version)
           {
-            const bool bulletproof2 = (rct::RCTTypeBulletproof2 <= tx.rct_signatures.type);
+            const bool bulletproof2 = compat::is_bulletproof_v2(tx.rct_signatures.type);
             const auto decrypted = lws::decode_amount(
               tx.rct_signatures.outPk.at(index).mask, tx.rct_signatures.ecdhInfo.at(index), active_derived, index, bulletproof2
             );
@@ -829,6 +830,7 @@ namespace lws
 
           subaddress_reader reader{disk, opts.enable_subaddresses};
           db::block_difficulty::unsigned_int diff{};
+          cryptonote::difficulty_type diff_for_check{};
           const db::block_id initial_height = db::block_id(fetched->start_height);
           for (auto block_data : boost::combine(blocks, indices))
           {
@@ -873,7 +875,11 @@ namespace lws
               if (self.stop_)
                 return false;
 
-              diff = cryptonote::next_difficulty(pow_window.pow_timestamps, pow_window.cumulative_diffs, get_target_time(db::block_id(fetched->start_height)));
+              const auto cumulative_diffs = convert_difficulties(pow_window.cumulative_diffs);
+              diff_for_check = cryptonote::next_difficulty(
+                pow_window.pow_timestamps, cumulative_diffs, get_target_time(db::block_id(fetched->start_height))
+              );
+              diff = db::block_difficulty::unsigned_int(diff_for_check);
 
               // skip POW hashing if done previously
               if (disk && last_pow < db::block_id(fetched->start_height))
@@ -883,7 +889,7 @@ namespace lws
 
                 const crypto::hash pow =
                   get_block_longhash(get_block_hashing_blob(block), db::block_id(fetched->start_height), block.major_version, *disk, initial_height, epee::to_span(blockchain));
-                if (!cryptonote::check_hash(pow, diff))
+                if (!cryptonote::check_hash(pow, diff_for_check))
                   MONERO_THROW(error::bad_blockchain, "Block had too low difficulty");
               }
             }
@@ -1196,6 +1202,7 @@ namespace lws
 
         // skip overlap block
         db::block_difficulty::unsigned_int diff = 0;
+        cryptonote::difficulty_type diff_for_check = 0;
         for (std::size_t i = 1; i < resp->blocks.size(); ++i)
         {
           const auto& block = resp->blocks[i].block;
@@ -1220,7 +1227,11 @@ namespace lws
           if (self.has_shutdown())
             return {error::signal_abort_process}; 
 
-          diff = cryptonote::next_difficulty(pow_window.pow_timestamps, pow_window.cumulative_diffs, get_target_time(height));
+          const auto cumulative_diffs = convert_difficulties(pow_window.cumulative_diffs);
+          diff_for_check = cryptonote::next_difficulty(
+            pow_window.pow_timestamps, cumulative_diffs, get_target_time(height)
+          );
+          diff = db::block_difficulty::unsigned_int(diff_for_check);
 
           // skip POW hashing when sync is within checkpoint
           // storage::sync_pow(...) currently verifies checkpoint hashes
@@ -1234,7 +1245,7 @@ namespace lws
             const crypto::hash pow =
               get_block_longhash(get_block_hashing_blob(block), height, block.major_version, disk, db::block_id(resp->start_height), epee::to_span(new_hashes));
 
-            if (!cryptonote::check_hash(pow, diff))
+            if (!cryptonote::check_hash(pow, diff_for_check))
             {
               MERROR("Block " << std::uint64_t(height) << "had too low difficulty");
               return {error::bad_blockchain};
@@ -1254,7 +1265,7 @@ namespace lws
         } // for every tx in block
 
         MONERO_CHECK(disk.sync_pow(db::block_id(resp->start_height), epee::to_span(new_hashes), epee::to_span(new_pow)));
-        MINFO("Verified up to block " << (resp->start_height + new_hashes.size() - 1) << " with hash " << hash << " and difficulty " << diff);
+        MINFO("Verified up to block " << (resp->start_height + new_hashes.size() - 1) << " with hash " << hash << " and difficulty " << diff_for_check);
 
       } // for until sync
 
@@ -1269,7 +1280,8 @@ namespace lws
     if (!std::is_sorted(users.begin(), users.end(), by_height{}))
       throw std::logic_error{"users must be sorted!"};
 
-    auto updated = disk.update(users[0].scan_height(), chain, users, pow);
+    const lws::account& first_user = users.data()[0];
+    auto updated = disk.update(first_user.scan_height(), chain, users, pow);
     if (!updated)
     {
       if (updated == lws::error::blockchain_reorg)
@@ -1292,7 +1304,7 @@ namespace lws
     // Publish when all scan threads have past this block
     // only address is printed from users, so height doesn't need updating
     if (!chain.empty() && client.has_publish())
-      rpc::publish_scanned(client, chain[chain.size() - 1], epee::to_span(users));
+      rpc::publish_scanned(client, chain.data()[chain.size() - 1], epee::to_span(users));
 
     return true;
   }

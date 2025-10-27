@@ -34,7 +34,8 @@
 #include <utility>
 #include <zmq.h>
 
-#include "byte_slice.h"    // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
+#include "compat/epee/byte_stream.h"
 #include "db/fwd.h"
 #include "common/expect.h" // monero/src
 #include "net/zmq.h"       // monero/src
@@ -135,7 +136,10 @@ namespace rpc
     template<typename M>
     static epee::byte_slice make_message(char const* const name, const M& message)
     {
-      return cryptonote::rpc::FullMessage::getRequest(name, message, 0);
+      M mutable_message{message};
+      auto full = cryptonote::rpc::FullMessage::requestMessage(name, std::addressof(mutable_message));
+      std::string json = full.getJson();
+      return epee::byte_slice{std::move(json)};
     }
 
     //! \return `async_client` to daemon. Thread safe.

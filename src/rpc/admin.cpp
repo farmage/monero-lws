@@ -34,6 +34,7 @@
 #include <utility>
 #include "db/string.h"
 #include "error.h"
+#include "compat/hex.h"
 #include "span.h" // monero/contrib/epee/include
 #include "wire.h"
 #include "wire/adapted/crypto.h"
@@ -274,7 +275,7 @@ namespace lws { namespace rpc
         output_error(dest, std::string{field}, "Expected " + std::to_string(sizeof(out) * 2) + " characters");
         return false;
       }
-      if (!epee::from_hex::to_buffer(epee::as_mut_byte_span(out), in))
+      if (!lws::compat::hex::to_pod(out, in))
       {
         output_error(dest, std::string{field}, "Invalid hex");
         return false;

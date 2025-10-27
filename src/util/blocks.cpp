@@ -41,6 +41,12 @@ namespace lws
   {
     crypto::hash result{};
 
+#ifndef RX_BLOCK_VERSION
+    (void)disk;
+    (void)cached_start;
+    (void)cached;
+#endif
+
     // block 202612 bug workaround
     if (height == db::block_id(202612))
     {
@@ -48,6 +54,7 @@ namespace lws
       epee::string_tools::hex_to_pod(longhash_202612, result);
       return result;
     }
+#ifdef RX_BLOCK_VERSION
     if (major_version >= RX_BLOCK_VERSION)
     {
       crypto::hash hash{};
@@ -58,7 +65,7 @@ namespace lws
         {
           if (cached.size() <= seed_height - std::uint64_t(cached_start))
             MONERO_THROW(error::bad_blockchain, "invalid seed_height for cache or DB");
-          hash = cached[seed_height - std::uint64_t(cached_start)];
+          hash = *(cached.data() + (seed_height - std::uint64_t(cached_start)));
         }
         else
           hash = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_block_hash(db::block_id(seed_height)));
@@ -69,9 +76,12 @@ namespace lws
       }
       crypto::rx_slow_hash(hash.data, bd.data(), bd.size(), result.data);
     } else {
+#endif
       const int pow_variant = major_version >= 7 ? major_version - 6 : 0;
-      crypto::cn_slow_hash(bd.data(), bd.size(), result, pow_variant, std::uint64_t(height));
+      crypto::cn_slow_hash(bd.data(), bd.size(), result, pow_variant);
+#ifdef RX_BLOCK_VERSION
     }
+#endif
     return result;
   }
 
@@ -84,4 +94,3 @@ namespace lws
     return true;
   }
 }
-

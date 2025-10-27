@@ -26,7 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <vector>
-#include "byte_slice.h" // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
 #include "fwd.h"
 
 namespace lws_test

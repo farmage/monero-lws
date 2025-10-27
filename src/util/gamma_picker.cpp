@@ -31,6 +31,7 @@
 #include <stdexcept>
 
 #include "crypto/crypto.h"
+#include "compat/xcash_crypto.h"
 #include "cryptonote_config.h"
 
 namespace lws
@@ -90,8 +91,9 @@ namespace lws
     if (!is_valid())
       throw std::logic_error{"Cannot select random output - blockchain height too small"};
 
-    static_assert(std::is_empty<crypto::random_device>(), "random_device is no longer cheap to construct");
-    static constexpr const crypto::random_device engine{};
+    using compat_random_device = compat::random_device;
+    static_assert(std::is_empty<compat_random_device>(), "random_device is no longer cheap to construct");
+    static constexpr const compat_random_device engine{};
     static_assert(CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE > 0);
     const auto end = offsets().end() - CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE + 1;
     const uint64_t num_rct_outputs = spendable_upper_bound();
@@ -104,7 +106,7 @@ namespace lws
       if (output_age_in_seconds > default_unlock_time)
         output_age_in_seconds -= default_unlock_time;
       else
-        output_age_in_seconds = crypto::rand_idx(recent_spend_window);
+        output_age_in_seconds = compat::rand_idx(recent_spend_window);
 
       std::uint64_t output_index = output_age_in_seconds * outputs_per_second;
       if (num_rct_outputs <= output_index)
@@ -118,7 +120,7 @@ namespace lws
       const std::uint64_t first_rct = offsets().begin() == selection ? 0 : *(selection - 1);
       const std::uint64_t n_rct = *selection - first_rct;
       if (n_rct != 0)
-        return first_rct + crypto::rand_idx(n_rct);
+        return first_rct + compat::rand_idx(n_rct);
       // block had zero outputs (miner didn't collect XMR?)
     }
     throw std::runtime_error{"Unable to select random output in spendable range using gamma distribution after 100 attempts"};

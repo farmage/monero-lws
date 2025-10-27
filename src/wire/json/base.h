@@ -30,7 +30,7 @@
 #include <string>
 #include <system_error>
 
-#include "byte_stream.h"
+#include "compat/epee/byte_stream.h"
 #include "wire/json/fwd.h"
 #include "wire/read.h"
 #include "wire/write.h"
@@ -55,4 +55,3 @@ namespace wire
     }
   };
 }
-

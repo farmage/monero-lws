@@ -111,7 +111,10 @@ namespace wire
     template<typename T>
     static constexpr bool check() noexcept
     {
-      return N != 0 ? ((sizeof(T) / N) <= max_ratio()) : false;
+      if constexpr (N == 0)
+        return true;
+      else
+        return ((sizeof(T) + (N - 1)) / N) <= max_ratio();
     }
   };
 

@@ -35,7 +35,7 @@
 #include <memory>
 #include <string>
 #include <zmq.h>
-#include "byte_slice.h"     // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
 #include "common/expect.h"  // monero/src
 #include "net/zmq.h"
 
@@ -162,4 +162,3 @@ namespace net { namespace zmq
   }
 
 }} // net // zmq
-

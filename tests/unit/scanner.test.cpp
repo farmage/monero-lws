@@ -37,7 +37,7 @@
 #include "db/chain.test.h"
 #include "db/storage.test.h"
 #include "device/device_default.hpp" // monero/src
-#include "hardforks/hardforks.h"     // monero/src
+#include "cryptonote_basic/hardfork.h"     // monero/src
 #include "net/zmq.h"                 // monero/src
 #include "rpc/client.h"
 #include "rpc/daemon_messages.h"     // monero/src
@@ -738,4 +738,3 @@ LWS_CASE("lws::scanner::sync and lws::scanner::run")
     } //SECTION (lws::scanner::run)
   } // SETUP
 } // LWS_CASE
-

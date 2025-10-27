@@ -31,7 +31,11 @@ set(monero-lws-wire_headers error.h field.h filters.h fwd.h json.h read.h traits
 
 add_library(monero-lws-wire ${monero-lws-wire_sources} ${monero-lws-wire_headers})
 target_include_directories(monero-lws-wire PUBLIC "${LMDB_INCLUDE}")
-target_link_libraries(monero-lws-wire PRIVATE monero::libraries)
+target_link_libraries(monero-lws-wire
+  PUBLIC
+    monero-lws-epee
+  PRIVATE
+    monero::libraries)
 
 add_subdirectory(json)
 add_subdirectory(msgpack)

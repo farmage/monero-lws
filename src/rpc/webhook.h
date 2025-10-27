@@ -32,7 +32,7 @@
 #include <boost/utility/string_ref.hpp>
 #include <chrono>
 #include <string>
-#include "byte_slice.h"      // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
 #include "misc_log_ex.h"             // monero/contrib/epee/include
 #include "net/http/client.h"
 #include "span.h"

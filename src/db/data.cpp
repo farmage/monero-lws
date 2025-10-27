@@ -30,6 +30,7 @@
 #include <memory>
 
 #include "cryptonote_config.h" // monero/src
+#include "compat/xcash_config.h"
 #include "db/string.h"
 #include "int-util.h"          // monero/contribe/epee/include
 #include "ringct/rctOps.h"     // monero/src

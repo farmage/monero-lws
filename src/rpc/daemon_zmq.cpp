@@ -47,8 +47,7 @@ namespace
   constexpr const std::size_t default_txextra_size = 2048;
   constexpr const std::size_t default_txpool_size = 32;
 
-  using max_blocks_per_fetch =
-    wire::max_element_count<COMMAND_RPC_GET_BLOCKS_FAST_MAX_BLOCK_COUNT>;
+  using max_blocks_per_fetch = wire::max_element_count<1000>;
 
   //! Not the default in cryptonote, but roughly a 31.8 MiB block
   using max_txes_per_block = wire::max_element_count<21845>; 
@@ -72,32 +71,12 @@ namespace rct
     wire::object(source, WIRE_FIELD(mask), WIRE_FIELD(amount));
   }
 
-  static void read_bytes(wire::json_reader& source, clsag& self)
-  {
-    wire::object(source, WIRE_FIELD(s), WIRE_FIELD(c1), WIRE_FIELD(D));
-  }
-
   static void read_bytes(wire::json_reader& source, mgSig& self)
   {
     using max_256 = wire::max_element_count<256>;
     wire::object(source,
       wire::field("ss", wire::array<max_256>(std::ref(self.ss))),
       WIRE_FIELD(cc)
-    );
-  }
-
-  static void read_bytes(wire::json_reader& source, BulletproofPlus& self)
-  {
-    wire::object(source,
-      WIRE_FIELD(V),
-      WIRE_FIELD(A),
-      WIRE_FIELD(A1),
-      WIRE_FIELD(B),
-      WIRE_FIELD(r1),
-      WIRE_FIELD(s1),
-      WIRE_FIELD(d1),
-      WIRE_FIELD(L),
-      WIRE_FIELD(R)
     );
   }
 
@@ -162,26 +141,20 @@ namespace rct
     {
       using rf_min_size = wire::min_element_sizeof<key64, key64, key64, key>;
       using bf_max = wire::max_element_count<BULLETPROOF_MAX_OUTPUTS>;
-      using bf_plus_max = wire::max_element_count<BULLETPROOF_PLUS_MAX_OUTPUTS>;
       using mlsags_max = max_inputs_per_tx;
-      using clsags_max = max_inputs_per_tx;
       using pseudo_outs_min_size = wire::min_element_sizeof<key>;
 
       wire::object(source,
         wire::field("range_proofs", wire::array<rf_min_size>(std::ref(self.prunable.rangeSigs))),
         wire::field("bulletproofs", wire::array<bf_max>(std::ref(self.prunable.bulletproofs))),
-        wire::field("bulletproofs_plus", wire::array<bf_plus_max>(std::ref(self.prunable.bulletproofs_plus))),
         wire::field("mlsags", wire::array<mlsags_max>(std::ref(self.prunable.MGs))),
-        wire::field("clsags", wire::array<clsags_max>(std::ref(self.prunable.CLSAGs))),
         wire::field("pseudo_outs", wire::array<pseudo_outs_min_size>(std::ref(self.pseudo_outs)))
       );
 
       const bool pruned =
         self.prunable.rangeSigs.empty() &&
         self.prunable.bulletproofs.empty() &&
-        self.prunable.bulletproofs_plus.empty() &&
         self.prunable.MGs.empty() &&
-        self.prunable.CLSAGs.empty() &&
         self.pseudo_outs.empty();
 
       if (pruned)
@@ -233,10 +206,12 @@ namespace cryptonote
   {
     wire::object(source, WIRE_FIELD(hash));
   }
+#ifdef LWS_HAVE_CRYPTO_VIEW_TAG
   static void read_bytes(wire::json_reader& source, txout_to_tagged_key& self)
   {
     wire::object(source, WIRE_FIELD(key), WIRE_FIELD(view_tag));
   }
+#endif
   static void read_bytes(wire::json_reader& source, txout_to_key& self)
   {
     wire::object(source, WIRE_FIELD(key));
@@ -247,7 +222,9 @@ namespace cryptonote
     wire::object(source,
       WIRE_FIELD(amount),
       WIRE_OPTION("to_key", txout_to_key, variant),
+#ifdef LWS_HAVE_CRYPTO_VIEW_TAG
       WIRE_OPTION("to_tagged_key", txout_to_tagged_key, variant),
+#endif
       WIRE_OPTION("to_script", txout_to_script, variant),
       WIRE_OPTION("to_scripthash", txout_to_scripthash, variant)
     );

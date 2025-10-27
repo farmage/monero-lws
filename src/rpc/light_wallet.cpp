@@ -39,6 +39,7 @@
 #include "error.h"
 #include "time_helper.h"       // monero/contrib/epee/include
 #include "ringct/rctOps.h"     // monero/src
+#include "compat/xcash_ringct.h"
 #include "span.h"              // monero/contrib/epee/include
 #include "util/random_outputs.h"
 #include "wire.h"
@@ -87,8 +88,13 @@ namespace
     if (std::numeric_limits<std::time_t>::max() < std::uint64_t(self))
       throw std::runtime_error{"Exceeded max time_t value"};
 
-    std::tm value;
-    if (!epee::misc_utils::get_gmt_time(std::time_t(self), value))
+    const std::time_t raw = std::time_t(self);
+    std::tm value{};
+#if defined(_WIN32)
+    if (gmtime_s(std::addressof(value), &raw) != 0)
+#else
+    if (gmtime_r(&raw, std::addressof(value)) == nullptr)
+#endif
       throw std::runtime_error{"Failed to convert std::time_t to std::tm"};
 
     char buf[21] = {0};
@@ -120,7 +126,7 @@ namespace
         rct::ecdhTuple encrypted{self.data.first.ringct_mask, rct::d2h(self.data.first.spend_meta.amount)};
 
         crypto::derivation_to_scalar(derived, self.data.first.spend_meta.index, scalar);
-        rct::ecdhEncode(encrypted, rct::sk2rct(scalar), false);
+        lws::compat::ecdh_encode(encrypted, rct::sk2rct(scalar), false);
 
         rct.commitment = rct::commit(self.data.first.spend_meta.amount, self.data.first.ringct_mask);
         rct.mask = encrypted.mask;

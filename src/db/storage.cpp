@@ -54,7 +54,7 @@
 #include "lmdb/key_stream.h"
 #include "lmdb/msgpack_table.h"
 #include "lmdb/table.h"
-#include "lmdb/util.h"
+#include "compat/xcash_lmdb.h"
 #include "lmdb/value_stream.h"
 #include "net/net_parse_helpers.h" // monero/contrib/epee/include
 #include "span.h"
@@ -2782,7 +2782,7 @@ namespace db
           if (!cur_block)
             return cur_block.error();
           // If a reorg past a checkpoint is being attempted
-          if (chain[chain.size() - 1] != cur_block->hash)
+          if (chain.empty() || *(chain.data() + (chain.size() - 1)) != cur_block->hash)
             return {error::bad_blockchain};
 
         }

@@ -32,7 +32,7 @@
 #include <boost/beast/http/message.hpp>
 #include <cstdint>
 #include <limits>
-#include "byte_slice.h" // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
 
 namespace net { namespace http
 {

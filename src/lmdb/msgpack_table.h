@@ -5,7 +5,7 @@
 #include "common/expect.h" // monero/src
 #include "lmdb/error.h"    // monero/src
 #include "lmdb/table.h"    // monero/src
-#include "lmdb/util.h"     // monero/src
+#include "compat/xcash_lmdb.h"
 #include "wire/msgpack.h"
 
 namespace lmdb

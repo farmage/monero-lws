@@ -34,8 +34,8 @@
 #include <type_traits>
 #include <system_error>
 
-#include "byte_slice.h" // monero/contrib/epee/include
-#include "byte_stream.h"// monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
+#include "compat/epee/byte_stream.h"
 #include "span.h"       // monero/contrib/epee/include
 #include "wire/error.h"
 #include "wire/field.h"

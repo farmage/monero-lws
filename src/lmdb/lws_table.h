@@ -3,10 +3,10 @@
 #include <utility>
 
 #include "common/expect.h"
-#include "lmdb/error.h"
+#include "compat/lmdb/error.h"
 #include "lmdb/lws_key_stream.h"
-#include "lmdb/table.h"
-#include "lmdb/util.h"
+#include "compat/lmdb/table.h"
+#include "compat/lmdb/util.h"
 #include "lmdb/lws_value_stream.h"
 
 namespace lws_lmdb
@@ -106,4 +106,3 @@ namespace lws_lmdb
         }
     };
 } // lws_lmdb
-

@@ -30,4 +30,5 @@ set(monero-lws-net-http_sources client.cpp)
 set(monero-lws-net-http_headers client.h slice_body.h)
 
 add_library(monero-lws-net-http ${monero-lws-net-http_sources} ${monero-lws-net-http_headers})
-target_link_libraries(monero-lws-net-http ${Boost_SYSTEM_LIBRARY} monero::libraries)
+target_include_directories(monero-lws-net-http PRIVATE "${MONERO_SOURCE_DIR}/contrib/epee/include")
+target_link_libraries(monero-lws-net-http ${Boost_SYSTEM_LIBRARY} monero::libraries monero-lws-epee monero-lws-compat)

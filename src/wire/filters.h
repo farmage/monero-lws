@@ -30,7 +30,7 @@
 #include <cassert>
 #include <type_traits>
 
-#include "lmdb/util.h"
+#include "compat/xcash_lmdb.h"
 
 // These functions are to be used with `wire::as_object(...)` key filtering
 

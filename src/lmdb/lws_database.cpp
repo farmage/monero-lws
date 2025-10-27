@@ -26,7 +26,7 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "lws_database.h"
 #include "lmdb/error.h"
-#include "lmdb/util.h"
+#include "compat/xcash_lmdb.h"
 
 #ifdef _WIN32
 namespace

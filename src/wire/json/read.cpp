@@ -28,6 +28,7 @@
 #include "read.h"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 #include <rapidjson/memorystream.h>
 #include <stdexcept>
@@ -41,6 +42,33 @@ namespace
 {
   //! Maximum number of bytes to display "near" JSON error.
   constexpr const std::size_t snippet_size = 30;
+
+  constexpr int hex_digit(const char c) noexcept
+  {
+    if ('0' <= c && c <= '9')
+      return c - '0';
+    if ('a' <= c && c <= 'f')
+      return 10 + (c - 'a');
+    if ('A' <= c && c <= 'F')
+      return 10 + (c - 'A');
+    return -1;
+  }
+
+  bool hex_to_buffer(epee::span<std::uint8_t> dest, const boost::string_ref value) noexcept
+  {
+    if (value.size() != dest.size() * 2)
+      return false;
+
+    for (std::size_t i = 0; i < dest.size(); ++i)
+    {
+      const int hi = hex_digit(value[2 * i]);
+      const int lo = hex_digit(value[2 * i + 1]);
+      if (hi < 0 || lo < 0)
+        return false;
+      dest.data()[i] = std::uint8_t((hi << 4) | lo);
+    }
+    return true;
+  }
 
   struct json_default_reject : rapidjson::BaseReaderHandler<rapidjson::UTF8<>, json_default_reject>
   {
@@ -306,7 +334,7 @@ namespace wire
     std::vector<std::uint8_t> out;
     out.resize(value.size() / 2);
 
-    if (!epee::from_hex::to_buffer(epee::to_mut_span(out), value))
+    if (!hex_to_buffer(epee::to_mut_span(out), value))
       WIRE_DLOG_THROW_(error::schema::binary);
 
     return out;
@@ -315,7 +343,7 @@ namespace wire
   void json_reader::binary(epee::span<std::uint8_t> dest)
   {
     const boost::string_ref value = get_next_string();
-    if (!epee::from_hex::to_buffer(dest, value))
+    if (!hex_to_buffer(dest, value))
       WIRE_DLOG_THROW(error::schema::fixed_binary, "of size" << dest.size() * 2 << " but got " << value.size());
   }
 
@@ -365,7 +393,7 @@ namespace wire
       const boost::string_ref key{value.ptr, value.length};
       for (std::size_t i = 0; i < map.size(); ++i)
       {
-        if (map[i].name == key)
+        if ((map.data()[i]).name == key)
           return i;
       }
       return map.size();
@@ -408,4 +436,3 @@ namespace wire
     return true;
   }
 }
-

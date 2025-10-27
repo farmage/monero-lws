@@ -58,6 +58,8 @@ namespace wire
   WIRE_DECLARE_BLOB(crypto::key_image);
   WIRE_DECLARE_BLOB(crypto::public_key);
   WIRE_DECLARE_BLOB(crypto::signature);
+#ifdef LWS_HAVE_CRYPTO_VIEW_TAG
   WIRE_DECLARE_BLOB(crypto::view_tag);
+#endif
   WIRE_DECLARE_BLOB(rct::key);
 }

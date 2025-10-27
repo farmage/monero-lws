@@ -30,5 +30,13 @@ set(monero-lws-lmdb_sources lws_database.cpp)
 set(monero-lws-lmdb_headers lws_database.h lws_key_stream.h lws_table.h lws_value_stream.h msgpack_table.h)
 
 add_library(monero-lws-lmdb ${monero-lws-lmdb_sources} ${monero-lws-lmdb_headers})
-target_include_directories(monero-lws-lmdb PUBLIC "${LMDB_INCLUDE}")
-target_link_libraries(monero-lws-lmdb PRIVATE monero::libraries)
+target_include_directories(monero-lws-lmdb
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src/compat"
+    "${LMDB_INCLUDE}")
+target_link_libraries(monero-lws-lmdb
+  PUBLIC
+    monero-lws-lmdb-compat
+    monero-lws-compat
+  PRIVATE
+    monero::libraries)

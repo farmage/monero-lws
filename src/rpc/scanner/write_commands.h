@@ -36,8 +36,8 @@
 #include <type_traits>
 #include <vector>
 
-#include "byte_slice.h"   // monero/contrib/epee/include
-#include "byte_stream.h"  // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
+#include "compat/epee/byte_stream.h"
 #include "commands.h"
 #include "common/expect.h"// monero/src
 #include "crypto/hash.h"  // monero/src

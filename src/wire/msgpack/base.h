@@ -33,7 +33,7 @@
 #include <limits>
 #include <tuple>
 
-#include "byte_slice.h"
+#include "compat/epee/byte_slice.h"
 #include "common/expect.h"
 #include "wire/msgpack/fwd.h"
 #include "wire/read.h"
@@ -178,4 +178,3 @@ namespace wire
     }
   };
 }
-

@@ -28,9 +28,11 @@
 #include "transactions.h"
 
 #include "cryptonote_config.h"
+#include "compat/xcash_config.h"
 #include "crypto/crypto.h"
 #include "crypto/hash.h"
 #include "ringct/rctOps.h"
+#include "compat/xcash_ringct.h"
 
 void lws::decrypt_payment_id(crypto::hash8& out, const crypto::key_derivation& key)
 {
@@ -51,7 +53,7 @@ boost::optional<std::pair<std::uint64_t, rct::key>> lws::decode_amount(const rct
   crypto::derivation_to_scalar(sk, index, scalar);
 
   rct::ecdhTuple copy{info};
-  rct::ecdhDecode(copy, rct::sk2rct(scalar), bulletproof2);
+  compat::ecdh_decode(copy, rct::sk2rct(scalar), bulletproof2);
 
   rct::key Ctmp;
   rct::addKeys2(Ctmp, copy.mask, copy.amount, rct::H);

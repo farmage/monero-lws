@@ -45,6 +45,7 @@
 #include "common/expect.h"       // monero/src
 #include "config.h"
 #include "error.h"
+#include "compat/hex.h"
 #include "db/storage.h"
 #include "db/string.h"
 #include "options.h"
@@ -301,7 +302,7 @@ namespace
     for (const auto id : prog.arguments)
     {
       ids.emplace_back();
-      if (!epee::from_hex::to_buffer(epee::as_mut_byte_span(ids.back()), id))
+      if (!lws::compat::hex::to_pod(ids.back(), id))
         throw std::runtime_error{"webhook_delete_uuid given invalid event_id/uuid"};
     }
 

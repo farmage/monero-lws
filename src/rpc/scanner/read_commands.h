@@ -38,7 +38,7 @@
 #include <utility>
 #include <vector>
 
-#include "byte_slice.h"  // monero/contrib/epee/include
+#include "compat/epee/byte_slice.h"
 #include "db/account.h"
 #include "misc_log_ex.h"
 #include "rpc/scanner/connection.h"

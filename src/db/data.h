@@ -39,7 +39,7 @@
 #include <vector>
 
 #include "crypto/crypto.h"
-#include "lmdb/util.h"
+#include "compat/xcash_lmdb.h"
 #include "ringct/rctTypes.h" //! \TODO brings in lots of includes, try to remove
 #include "wire/fwd.h"
 #include "wire/json/fwd.h"

@@ -80,8 +80,9 @@ namespace lws { namespace rpc
     if (users.empty())
       return;
 
+    const account& first = *users.begin();
     const minimal_scanned output{
-      std::cref(id), users[0].scan_height(), users
+      std::cref(id), first.scan_height(), users
     };
     const epee::span<const minimal_scanned> event{std::addressof(output), 1};
     zmq_send(client, event, json_topic, msgpack_topic);

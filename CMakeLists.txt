@@ -33,6 +33,16 @@ enable_language(CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_definitions(-DBOOST_UUID_DISABLE_ALIGNMENT) # This restores UUID's std::has_unique_object_representations property
+add_compile_definitions(_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES -include ${CMAKE_SOURCE_DIR}/src/compat/legacy_functional.h")
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(libzmq IMPORTED_TARGET libzmq)
+if (libzmq_FOUND)
+  set(pkgcfg_lib_libzmq_zmq "${libzmq_LIBRARIES}")
+endif()
 
 option(BUILD_TESTS "Build Tests" OFF)
 option(WITH_RMQ "Build with RMQ publish support" OFF)
@@ -67,29 +77,24 @@ endif()
 set(MONERO_LIBRARIES
   daemon_messages
   serialization
-  lmdb_lib
-  net
+  blockchain_db
   cryptonote_core
   cryptonote_basic
-  cryptonote_format_utils_basic
+  cryptonote_protocol
   ringct
   ringct_basic
   multisig
-  hardforks
   checkpoints
-  blockchain_db
   common
   lmdb
   device
   cncrypto
-  randomx
   epee
   easylogging
   version
-  wallet-crypto
 )
 
-set(MONERO_OPTIONAL wallet-crypto)
+set(MONERO_OPTIONAL)
 
 if (MONERO_BUILD_DIR)
 
@@ -128,7 +133,9 @@ if (MONERO_BUILD_DIR)
     HIDAPI_INCLUDE_DIR
     HIDAPI_LIBRARY
     libzmq_INCLUDE_DIRS
+    ZMQ_LIB
     LMDB_INCLUDE
+    LMDB_LIBRARY
     monero_SOURCE_DIR
     OPENSSL_INCLUDE_DIR
     OPENSSL_CRYPTO_LIBRARY
@@ -151,6 +158,27 @@ if (MONERO_BUILD_DIR)
     message(FATAL_ERROR "Compiler for monero build differs from this project")
   endif()
 
+  if (NOT monero_pkgcfg_lib_libzmq_zmq AND monero_ZMQ_LIB)
+    set(monero_pkgcfg_lib_libzmq_zmq "${monero_ZMQ_LIB}")
+  endif()
+
+  if (monero_HIDAPI_INCLUDE_DIR AND NOT monero_HIDAPI_INCLUDE_DIRS)
+    set(monero_HIDAPI_INCLUDE_DIRS "${monero_HIDAPI_INCLUDE_DIR}")
+  endif()
+
+  file(GLOB_RECURSE MONERO_LIBRARY_FILES LIST_DIRECTORIES FALSE
+    "${MONERO_BUILD_DIR}/lib*.a"
+    "${MONERO_BUILD_DIR}/lib*.so"
+    "${MONERO_BUILD_DIR}/lib*.dylib"
+    "${MONERO_BUILD_DIR}/lib*.lib"
+  )
+  set(MONERO_LIBRARY_DIRS "")
+  foreach(FILE ${MONERO_LIBRARY_FILES})
+    get_filename_component(FILE_DIR "${FILE}" DIRECTORY)
+    list(APPEND MONERO_LIBRARY_DIRS "${FILE_DIR}")
+  endforeach()
+  list(REMOVE_DUPLICATES MONERO_LIBRARY_DIRS)
+
   if ("${monero_UNBOUND_LIBRARIES}" STREQUAL "UNBOUND_LIBRARIES-NOTFOUND")
     unset(monero_UNBOUND_LIBRARIES)
   endif()
@@ -161,7 +189,7 @@ if (MONERO_BUILD_DIR)
   endif()
 
   foreach (LIB ${MONERO_LIBRARIES})
-    find_library(LIB_PATH NAMES "${LIB}" PATHS ${MONERO_BUILD_DIR} PATH_SUFFIXES "/src/${LIB}" "external/${LIB}" ${MONERO_SEARCH_PATHS} NO_DEFAULT_PATH)
+    find_library(LIB_PATH NAMES "${LIB}" PATHS ${MONERO_LIBRARY_DIRS} ${MONERO_BUILD_DIR} PATH_SUFFIXES "/src/${LIB}" "external/${LIB}" ${MONERO_SEARCH_PATHS} NO_DEFAULT_PATH)
 
     list(FIND MONERO_OPTIONAL "${LIB}" LIB_OPTIONAL)
     if (NOT LIB_PATH)
@@ -179,6 +207,7 @@ if (MONERO_BUILD_DIR)
 
   set(LMDB_INCLUDE "${monero_LMDB_INCLUDE}")
   set(LMDB_LIB_PATH "monero::lmdb")
+  set(MONERO_lmdb "monero::lmdb")
 else () # NOT MONERO_BUILD_DIR
   if (NOT MONERO_SOURCE_DIR)
     set (MONERO_SOURCE_DIR "${monero-lws_SOURCE_DIR}/external/monero")
@@ -200,7 +229,18 @@ else () # NOT MONERO_BUILD_DIR
   else()
     set(monero_SODIUM_LIBRARY "${monero_sodium_LIBRARY_RELEASE}")
   endif()
+  set(LMDB_INCLUDE "${MONERO_SOURCE_DIR}/external/db_drivers/liblmdb")
+  set(LMDB_LIB_PATH "lmdb")
+  set(MONERO_lmdb "lmdb")
 endif()
+
+function(lws_fix_miniupnpc)
+  if (TARGET libminiupnpc-static)
+    set_target_properties(libminiupnpc-static PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "")
+  endif()
+endfunction()
+
+cmake_language(DEFER CALL lws_fix_miniupnpc)
 
 #
 # Dependencies specific to monero-lws
@@ -232,7 +272,23 @@ else()
 endif()
 
 set(ZMQ_INCLUDE_PATH "${libzmq_INCLUDE_DIRS}")
+if (NOT ZMQ_INCLUDE_PATH)
+  find_path(_xcash_zmq_include NAMES zmq.h PATHS /opt/homebrew/include /usr/local/include)
+  if (_xcash_zmq_include)
+    set(ZMQ_INCLUDE_PATH "${_xcash_zmq_include}")
+  endif()
+  unset(_xcash_zmq_include CACHE)
+endif()
+
 set(ZMQ_LIB "${monero_pkgcfg_lib_libzmq_zmq}")
+if (NOT ZMQ_LIB)
+  find_library(_xcash_zmq_lib NAMES zmq libzmq PATHS /opt/homebrew/lib /usr/local/lib)
+  if (_xcash_zmq_lib)
+    set(ZMQ_LIB "${_xcash_zmq_lib}")
+    set(monero_pkgcfg_lib_libzmq_zmq "${_xcash_zmq_lib}")
+  endif()
+  unset(_xcash_zmq_lib CACHE)
+endif()
 if (monero_SODIUM_LIBRARY)
   set(SODIUM_LIBRARY "${monero_SODIUM_LIBRARY}")
 else ()
@@ -258,6 +314,23 @@ if(monero_sodium_LIBRARY_RELEASE)
   set(ZMQ_LIB "${ZMQ_LIB};${monero_sodium_LIBRARY_RELEASE}")
 endif()
 
+if(APPLE)
+  set(_xcash_zmq_libs "")
+  foreach(_lib ${ZMQ_LIB})
+    if (_lib MATCHES "/usr/local/lib/libzmq" OR _lib STREQUAL "-lzmq" OR _lib STREQUAL "zmq")
+      list(APPEND _xcash_zmq_libs "/opt/homebrew/lib/libzmq.dylib")
+    else()
+      list(APPEND _xcash_zmq_libs "${_lib}")
+    endif()
+  endforeach()
+  if (_xcash_zmq_libs)
+    set(ZMQ_LIB "${_xcash_zmq_libs}")
+    list(GET _xcash_zmq_libs 0 _xcash_primary_zmq)
+    set(monero_pkgcfg_lib_libzmq_zmq "${_xcash_primary_zmq}")
+    unset(_xcash_primary_zmq)
+  endif()
+endif()
+
 if(STATIC AND NOT IOS)
   if(UNIX)
     set(monero_OPENSSL_LIBRARIES "${monero_OPENSSL_LIBRARIES};${CMAKE_DL_LIBS};${CMAKE_THREAD_LIBS_INIT}")
@@ -270,37 +343,70 @@ if(APPLE)
 endif()
 
 add_library(monero::libraries INTERFACE IMPORTED)
-set_property(TARGET monero::libraries PROPERTY
-  INTERFACE_INCLUDE_DIRECTORIES
-    ${Boost_INCLUDE_DIR}
-    ${monero_HIDAPI_INCLUDE_DIRS}
-    ${monero_OPENSSL_INCLUDE_DIR}
-    "${MONERO_BUILD_DIR}/generated_include"
-    "${MONERO_SOURCE_DIR}/contrib/epee/include"
-    "${MONERO_SOURCE_DIR}/external/easylogging++"
-    "${MONERO_SOURCE_DIR}/external/rapidjson/include"
-    "${MONERO_SOURCE_DIR}/external/supercop/include"
-    "${MONERO_SOURCE_DIR}/src"
+
+set(MONERO_INTERFACE_INCLUDES
+  ${Boost_INCLUDE_DIR}
+  ${monero_HIDAPI_INCLUDE_DIRS}
+  ${monero_OPENSSL_INCLUDE_DIR}
 )
 
+set(_monero_include_candidates
+  "${MONERO_BUILD_DIR}/generated_include"
+  "${MONERO_SOURCE_DIR}/contrib/epee/include"
+  "${MONERO_SOURCE_DIR}/external/easylogging++"
+  "${MONERO_SOURCE_DIR}/external/rapidjson/include"
+  "${MONERO_SOURCE_DIR}/external/supercop/include"
+  "${MONERO_SOURCE_DIR}/external/VRF_functions"
+  "${MONERO_SOURCE_DIR}/VRF_functions"
+  "${MONERO_SOURCE_DIR}/src"
+)
+
+foreach(_candidate IN LISTS _monero_include_candidates)
+  if (EXISTS "${_candidate}")
+    list(APPEND MONERO_INTERFACE_INCLUDES "${_candidate}")
+  endif()
+endforeach()
+
+list(FILTER MONERO_INTERFACE_INCLUDES EXCLUDE REGEX "^$")
+
+set(_validated_monero_includes "")
+foreach(_inc IN LISTS MONERO_INTERFACE_INCLUDES)
+  if (_inc AND EXISTS "${_inc}")
+    list(APPEND _validated_monero_includes "${_inc}")
+  endif()
+endforeach()
+set(MONERO_INTERFACE_INCLUDES "${_validated_monero_includes}")
+
 set_property(TARGET monero::libraries PROPERTY
-  INTERFACE_LINK_LIBRARIES
-    ${IMPORTED_MONERO_LIBRARIES}
-    ${Boost_CHRONO_LIBRARY}
-    ${Boost_FILESYSTEM_LIBRARY}
-    ${Boost_PROGRAM_OPTIONS_LIBRARY}
-    ${Boost_REGEX_LIBRARY}
-    ${Boost_SERIALIZATION_LIBRARY}
-    ${Boost_SYSTEM_LIBRARY}
-    ${Boost_THREAD_LIBRARY}
-    ${monero_HIDAPI_LIBRARY}
-    ${monero_usb_LIBRARY}
-    ${monero_LIBUDEV_LIBRARY}
-    ${monero_OPENSSL_SSL_LIBRARY}
-    ${monero_OPENSSL_CRYPTO_LIBRARY}
-    ${SODIUM_LIBRARY}
-    ${monero_UNBOUND_LIBRARIES}
-    ${CMAKE_DL_LIBS}
+  INTERFACE_INCLUDE_DIRECTORIES "${MONERO_INTERFACE_INCLUDES}"
+)
+
+set_property(TARGET monero::libraries APPEND PROPERTY
+  INTERFACE_COMPILE_DEFINITIONS _LIBCPP_ENABLE_CXX17_REMOVED_FEATURES)
+
+set(MONERO_INTERFACE_LINK_LIBS
+  ${IMPORTED_MONERO_LIBRARIES}
+  ${Boost_CHRONO_LIBRARY}
+  ${Boost_FILESYSTEM_LIBRARY}
+  ${Boost_PROGRAM_OPTIONS_LIBRARY}
+  ${Boost_REGEX_LIBRARY}
+  ${Boost_SERIALIZATION_LIBRARY}
+  ${Boost_SYSTEM_LIBRARY}
+  ${Boost_THREAD_LIBRARY}
+  ${monero_HIDAPI_LIBRARY}
+  ${monero_usb_LIBRARY}
+  ${monero_LIBUDEV_LIBRARY}
+  ${monero_OPENSSL_SSL_LIBRARY}
+  ${monero_OPENSSL_CRYPTO_LIBRARY}
+  ${SODIUM_LIBRARY}
+  ${monero_UNBOUND_LIBRARIES}
+  ${CMAKE_DL_LIBS}
+)
+
+list(FILTER MONERO_INTERFACE_LINK_LIBS EXCLUDE REGEX "^$")
+
+set_property(TARGET monero::libraries PROPERTY
+  INTERFACE_LINK_LIBRARIES "${MONERO_INTERFACE_LINK_LIBS}"
 )
 
 #

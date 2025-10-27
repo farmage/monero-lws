@@ -65,11 +65,14 @@
 #include "config.h"
 #include "crypto/crypto.h"         // monero/src
 #include "cryptonote_config.h"     // monero/src
+#include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "db/data.h"
 #include "db/storage.h"
 #include "db/string.h"
 #include "error.h"
-#include "lmdb/util.h"             // monero/src
+#include "string_tools.h"          // monero/contrib/epee/include
+#include "compat/xcash_config.h"
+#include "compat/xcash_lmdb.h"
 #include "net/http/client.h"
 #include "net/http/slice_body.h"
 #include "net/net_parse_helpers.h" // monero/contrib/epee/include
@@ -691,9 +694,7 @@ namespace lws
 
       static expect<response> handle(request req, const connection_data& data,  std::function<async_complete>&& resume)
       {
-        using distribution_rpc = cryptonote::rpc::GetOutputDistribution;
         using histogram_rpc = cryptonote::rpc::GetOutputHistogram;
-        using distribution_rpc = cryptonote::rpc::GetOutputDistribution;
 
         if (50 < req.count || 20 < req.amounts.values.size())
           return {lws::error::exceeded_rest_request_limit};
@@ -875,8 +876,10 @@ namespace lws
                 next.amounts.values.insert(next.amounts.values.end(), ringct_count, 0);
               }
 
+#if LWS_SUPPORTS_OUTPUT_DISTRIBUTION
               if (ringct_count && (distributions.empty() || (daemon_cache_timeout < std::chrono::steady_clock::now() - last)))
               {
+                using distribution_rpc = cryptonote::rpc::GetOutputDistribution;
                 distribution_rpc::Request distribution_req{};
                 if (ringct_count == next.amounts.values.size())
                 {
@@ -928,6 +931,13 @@ namespace lws
                   );
                 }
               }
+#else
+              if (ringct_count && (distributions.empty() || (daemon_cache_timeout < std::chrono::steady_clock::now() - last)))
+              {
+                if (next.amounts.values.size() < ringct_count)
+                  next.amounts.values.resize(ringct_count, 0);
+              }
+#endif
 
               class zmq_fetch_keys
               {
@@ -1053,7 +1063,7 @@ namespace lws
       using request = rpc::get_unspent_outs_request;
       using response = epee::byte_slice; // somtimes async response
       using async_response = rpc::get_unspent_outs_response;
-      using rpc_command = cryptonote::rpc::GetFeeEstimate;
+      using rpc_command = cryptonote::rpc::GetPerKBFeeEstimate;
 
       static expect<response> generate_response(request req, const expect<rpc_command::Response>& rpc, db::storage disk)
       {
@@ -1098,19 +1108,21 @@ namespace lws
         if (received < std::uint64_t(req.amount))
           return {lws::error::not_enough_amount};
 
-        if (rpc->size_scale == 0 || 1024 < rpc->size_scale || rpc->fee_mask == 0)
+        if (rpc->estimated_fee_per_kb == 0)
           return {lws::error::bad_daemon_response};
 
-        const std::uint64_t per_byte_fee =
-          rpc->estimated_base_fee / rpc->size_scale;
+        const std::uint64_t per_kb_fee = rpc->estimated_fee_per_kb;
+        const std::uint64_t per_byte_fee = (per_kb_fee + 1023) / 1024;
+        const std::uint64_t fee_mask = 1;
+        std::vector<std::uint64_t> fees{per_kb_fee};
 
         return json_response(
           async_response{
             per_byte_fee,
-            rpc->fee_mask,
+            fee_mask,
             rpc::safe_uint64(received),
             std::move(unspent),
-            rpc->fees,
+            std::move(fees),
             std::move(req.creds.key)
           }
         );
@@ -1139,7 +1151,7 @@ namespace lws
           {
             rpc_command::Request req{};
             req.num_grace_blocks = 10;
-            out = rpc::client::make_message("get_dynamic_fee_estimate", req);
+            out = rpc::client::make_message(rpc_command::name, req);
           }
         };
 
@@ -1470,7 +1482,7 @@ namespace lws
 
       static expect<response> handle(request req, const connection_data& data, std::function<async_complete>&& resume)
       {
-        using transaction_rpc = cryptonote::rpc::SendRawTxHex;
+        using transaction_rpc = cryptonote::rpc::SendRawTx;
 
         struct frame
         {
@@ -1503,9 +1515,13 @@ namespace lws
 
         transaction_rpc::Request daemon_req{};
         daemon_req.relay = true;
-        daemon_req.tx_as_hex = std::move(req.tx);
+        std::string tx_blob;
+        if (!epee::string_tools::parse_hexstr_to_binbuff(req.tx, tx_blob))
+          return {lws::error::bad_client_tx};
+        if (!cryptonote::parse_and_validate_tx_from_blob(tx_blob, daemon_req.tx))
+          return {lws::error::bad_client_tx};
 
-        epee::byte_slice msg = rpc::client::make_message("send_raw_tx_hex", daemon_req);
+        epee::byte_slice msg = rpc::client::make_message(transaction_rpc::name, daemon_req);
 
         static cached_result cache;
         boost::unique_lock<boost::mutex> lock{cache.sync};

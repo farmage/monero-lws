@@ -27,6 +27,59 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 include_directories(.)
+add_compile_options(-include "${CMAKE_SOURCE_DIR}/src/compat/xcash_expect.h")
+
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES "${MONERO_SOURCE_DIR}/src")
+check_cxx_source_compiles([=[
+  #include "crypto/crypto.h"
+  int main()
+  {
+    crypto::view_tag tag{};
+    (void)tag;
+    return 0;
+  }
+]=] LWS_HAVE_CRYPTO_VIEW_TAG)
+unset(CMAKE_REQUIRED_INCLUDES)
+if (LWS_HAVE_CRYPTO_VIEW_TAG)
+  add_compile_definitions(LWS_HAVE_CRYPTO_VIEW_TAG)
+endif()
+
+add_library(monero-lws-compat INTERFACE)
+target_include_directories(monero-lws-compat
+  INTERFACE
+    "${CMAKE_SOURCE_DIR}/src/compat"
+    "${MONERO_SOURCE_DIR}/contrib/epee/include")
+
+add_library(monero-lws-lmdb-compat
+  compat/lmdb/database.cpp
+  compat/lmdb/error.cpp
+  compat/lmdb/table.cpp
+  compat/lmdb/value_stream.cpp)
+target_link_libraries(monero-lws-lmdb-compat
+  PUBLIC
+    monero::libraries
+    monero-lws-compat)
+target_include_directories(monero-lws-lmdb-compat
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src/compat"
+    "${LMDB_INCLUDE}"
+  PRIVATE
+    "${MONERO_SOURCE_DIR}/src"
+)
+
+add_library(monero-lws-epee
+  compat/epee/byte_slice.cpp
+  compat/epee/byte_stream.cpp
+  compat/epee/net_ssl.cpp)
+target_include_directories(monero-lws-epee
+  PUBLIC
+    "${CMAKE_SOURCE_DIR}/src/compat"
+    "${MONERO_SOURCE_DIR}/contrib/epee/include")
+target_link_libraries(monero-lws-epee
+  PUBLIC
+    monero::libraries
+    monero-lws-compat)
 
 add_subdirectory(lmdb)
 add_subdirectory(wire)

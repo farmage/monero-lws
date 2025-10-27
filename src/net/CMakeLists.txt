@@ -28,8 +28,9 @@
 
 add_subdirectory(http)
 
-set(monero-lws-net_sources zmq_async.cpp)
+set(monero-lws-net_sources zmq_async.cpp ../compat/net/zmq.cpp)
 set(monero-lws-net_headers zmq_async.h)
 
 add_library(monero-lws-net ${monero-lws-net_sources} ${monero-lws-net_headers})
-target_link_libraries(monero-lws-net monero-lws-net-http monero::libraries)
+target_include_directories(monero-lws-net PRIVATE "${MONERO_SOURCE_DIR}/contrib/epee/include")
+target_link_libraries(monero-lws-net monero-lws-net-http monero::libraries monero-lws-epee monero-lws-compat)
