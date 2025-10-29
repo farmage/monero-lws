@@ -33,8 +33,19 @@ enable_language(CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_definitions(-DBOOST_UUID_DISABLE_ALIGNMENT) # This restores UUID's std::has_unique_object_representations property
-add_compile_definitions(_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES -include ${CMAKE_SOURCE_DIR}/src/compat/legacy_functional.h")
+
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("
+#include <cstddef>
+#ifndef _LIBCPP_VERSION
+#error not libc++
+#endif
+int main(){return 0;}" HAVE_LIBCXX)
+
+if (HAVE_LIBCXX)
+  add_compile_definitions(_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES)
+  add_compile_options(-include${CMAKE_SOURCE_DIR}/src/compat/legacy_functional.h)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
@@ -381,8 +392,10 @@ set_property(TARGET monero::libraries PROPERTY
   INTERFACE_INCLUDE_DIRECTORIES "${MONERO_INTERFACE_INCLUDES}"
 )
 
-set_property(TARGET monero::libraries APPEND PROPERTY
-  INTERFACE_COMPILE_DEFINITIONS _LIBCPP_ENABLE_CXX17_REMOVED_FEATURES)
+if (HAVE_LIBCXX)
+  set_property(TARGET monero::libraries APPEND PROPERTY
+    INTERFACE_COMPILE_DEFINITIONS _LIBCPP_ENABLE_CXX17_REMOVED_FEATURES)
+endif()
 
 set(MONERO_INTERFACE_LINK_LIBS
   ${IMPORTED_MONERO_LIBRARIES}

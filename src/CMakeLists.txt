@@ -27,7 +27,7 @@
 # THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 include_directories(.)
-add_compile_options(-include "${CMAKE_SOURCE_DIR}/src/compat/xcash_expect.h")
+add_compile_options(-include${CMAKE_SOURCE_DIR}/src/compat/xcash_expect.h)
 
 include(CheckCXXSourceCompiles)
 set(CMAKE_REQUIRED_INCLUDES "${MONERO_SOURCE_DIR}/src")
