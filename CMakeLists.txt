@@ -257,11 +257,11 @@ if(STATIC)
 endif()
 find_package(Boost 1.70 QUIET REQUIRED COMPONENTS chrono context coroutine filesystem program_options regex serialization thread)
 
-if (NOT (Boost_THREAD_LIBRARY STREQUAL monero_Boost_THREAD_LIBRARY_RELEASE))
-  message(STATUS "Found Boost_THREAD_LIBRARY: ${Boost_THREAD_LIBRARY}")
-  message(STATUS "Found monero_Boost_THREAD_LIBRARY_RELEASE: ${monero_Boost_THREAD_LIBRARY_RELEASE}")
-  message(FATAL_ERROR "Boost libraries for monero build differs from this project")
-endif()
+# if (NOT (Boost_THREAD_LIBRARY STREQUAL monero_Boost_THREAD_LIBRARY_RELEASE))
+#   message(STATUS "Found Boost_THREAD_LIBRARY: ${Boost_THREAD_LIBRARY}")
+#   message(STATUS "Found monero_Boost_THREAD_LIBRARY_RELEASE: ${monero_Boost_THREAD_LIBRARY_RELEASE}")
+#   message(FATAL_ERROR "Boost libraries for monero build differs from this project")
+# endif()
 
 if (WITH_RMQ)
   find_path(RMQ_INCLUDE_DIR "amqp.h")
@@ -405,10 +405,10 @@ set(MONERO_INTERFACE_LINK_LIBS
 
 list(FILTER MONERO_INTERFACE_LINK_LIBS EXCLUDE REGEX "^$")
 
-set_property(TARGET monero::libraries PROPERTY
-  INTERFACE_LINK_LIBRARIES "${MONERO_INTERFACE_LINK_LIBS}"
-)
-
+# set_property(TARGET monero::libraries PROPERTY
+#   INTERFACE_LINK_LIBRARIES "${MONERO_INTERFACE_LINK_LIBS}"
+# )
+target_link_libraries(monero::libraries INTERFACE ${MONERO_INTERFACE_LINK_LIBS})
 #
 # Build monero-lws code
 #
