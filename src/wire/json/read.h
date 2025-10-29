@@ -87,6 +87,9 @@ namespace wire
     //! \throw wire::exception if next token cannot be read as hex into `dest`.
     void binary(epee::span<std::uint8_t> dest) override final;
 
+    //! \throw wire::exception if next token not array of integers (0-255)
+    std::vector<std::uint8_t> binary_array();
+
 
     //! \throw wire::exception if next token not `[`.
     std::size_t start_array(std::size_t) override final;

@@ -157,8 +157,9 @@ namespace rct
         self.prunable.MGs.empty() &&
         self.pseudo_outs.empty();
 
-      if (pruned)
-        WIRE_DLOG_THROW(wire::error::schema::array, "Expected at least one prunable field");
+      // TODO: consider allowing all empty for testing pruned txns
+      // if (pruned)
+      //   WIRE_DLOG_THROW(wire::error::schema::array, "Expected at least one prunable field");
     }
   } // anonymous
 
@@ -186,7 +187,8 @@ namespace rct
       self.txnFee = std::move(*txnFee);
     }
     else if (!self.ecdhInfo.empty() || !self.outPk.empty() || txnFee)
-      WIRE_DLOG_THROW(wire::error::schema::invalid_key, "Did not expected `encrypted`, `commitments`, or `fee`");
+      // WIRE_DLOG_THROW(wire::error::schema::invalid_key, "Did not expected `encrypted`, `commitments`, or `fee`");
+      MDEBUG("Did not expected `encrypted`, `commitments`, or `fee`");
 
     if (prunable)
     {
@@ -261,6 +263,17 @@ namespace cryptonote
     );
   }
 
+  // Custom reader for extra field that comes as array of integers
+  struct extra_reader
+  {
+    std::vector<std::uint8_t>& dest;
+    
+    void read_bytes(wire::json_reader& source) const
+    {
+      dest = source.binary_array();
+    }
+  };
+
   void read_bytes(wire::json_reader& source, transaction& self)
   {
     self.vin.reserve(default_inputs);
@@ -271,7 +284,7 @@ namespace cryptonote
       WIRE_FIELD(unlock_time),
       wire::field("inputs", wire::array<max_inputs_per_tx>(std::ref(self.vin))),
       wire::field("outputs", wire::array<max_outputs_per_tx>(std::ref(self.vout))),
-      WIRE_FIELD(extra),
+      wire::field("extra", extra_reader{self.extra}),
       WIRE_FIELD_ARRAY(signatures, max_inputs_per_tx),
       wire::field("ringct", std::ref(self.rct_signatures))
     );

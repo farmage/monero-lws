@@ -1,0 +1,1 @@
+../build-debug/src/monero-lws-daemon --daemon tcp://seed3.xcash.tech:18282 --rest-server http://127.0.0.1:8080 --admin-rest-server http://127.0.0.1:8081 --db-path ../db-data --scan-threads 4 --log-level 1

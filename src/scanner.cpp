@@ -38,6 +38,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -665,16 +666,30 @@ namespace lws
       { // previous `try` block; leave to prevent git blame spam
         std::sort(users.begin(), users.end(), by_height{});
 
-        /// RPC server assumes that `start_height == 0` means use
+        /// RPC server assumes that `start_hight == 0` means use
         // block ids. This technically skips genesis block.
         cryptonote::rpc::GetBlocksFast::Request req{};
         req.start_height = std::uint64_t(users.begin()->scan_height());
         req.start_height = std::max(std::uint64_t(1), req.start_height);
-        req.prune = !opts.untrusted_daemon;
+        // req.prune = !opts.untrusted_daemon;
+        req.prune = false; // always get full blocks to scan outputs properly
+
+
+        const auto log_rpc_request = [](const char* endpoint, const epee::byte_slice& message)
+        {
+          std::string payload;
+          if (!message.empty())
+            payload.assign(reinterpret_cast<const char*>(message.data()), message.size());
+          MDEBUG("Sending " << endpoint << " request (" << message.size() << " bytes): " << payload);
+        };
 
         epee::byte_slice block_request = rpc::client::make_message("get_blocks_fast", req);
+        // log_rpc_request("get_blocks_fast", block_request);
         if (!send(client, block_request.clone()))
           return false;
+
+        constexpr std::uint64_t scan_progress_step = 5000;
+        std::uint64_t next_scan_log_height = scan_progress_step;
 
         std::vector<crypto::hash> blockchain{};
         std::vector<db::pow_sync> new_pow{};
@@ -748,6 +763,7 @@ namespace lws
               {
                 req.start_height = std::uint64_t(oldest);
                 block_request = rpc::client::make_message("get_blocks_fast", req);
+                // log_rpc_request("get_blocks_fast", block_request);
                 if (!send(client, block_request.clone()))
                   return false;
                 continue; // to next get_blocks_fast read
@@ -793,12 +809,14 @@ namespace lws
             } // wait for block
 
             // request next chunk of blocks
+            // log_rpc_request("get_blocks_fast", block_request);
             if (!send(client, block_request.clone()))
               return false;
             continue; // to next get_blocks_fast read
           } // if only one block was fetched
 
           // request next chunk of blocks
+          // log_rpc_request("get_blocks_fast", block_request);
           if (!send(client, block_request.clone()))
             return false;
 
@@ -936,6 +954,27 @@ namespace lws
           if (!store(self.io_, client, self.webhooks_, epee::to_span(blockchain), epee::to_span(users), epee::to_span(new_pow)))
             return false;
 
+          if (leader_thread && fetched->current_height != 0)
+          {
+            const std::uint64_t last_height = fetched->start_height ? fetched->start_height - 1 : 0;
+            if (last_height >= next_scan_log_height || last_height >= (fetched->current_height - 1))
+            {
+              std::uint64_t percent = 100;
+              if (last_height < fetched->current_height)
+              {
+                if (last_height <= (std::numeric_limits<std::uint64_t>::max() / 100))
+                  percent = (last_height * 100) / fetched->current_height;
+                else
+                  percent = 99;
+              }
+              MINFO("Scan progress: " << last_height << "/" << fetched->current_height << " (" << percent << "%) across " << users.size() << " account(s)");
+              if (std::numeric_limits<std::uint64_t>::max() - scan_progress_step <= last_height)
+                next_scan_log_height = std::numeric_limits<std::uint64_t>::max();
+              else
+                next_scan_log_height = last_height + scan_progress_step;
+            }
+          }
+
           // TODO         
           if (opts.untrusted_daemon && leader_thread && fetched->start_height % 4 == 0 && last_pow < db::block_id(fetched->start_height))
           {
@@ -1070,6 +1109,15 @@ namespace lws
       epee::byte_slice msg = rpc::client::make_message(endpoint, req);
       auto start = std::chrono::steady_clock::now();
 
+      const auto log_rpc_request = [](const char* endpoint, const epee::byte_slice& message)
+      {
+        std::string payload;
+        if (!message.empty())
+          payload.assign(reinterpret_cast<const char*>(message.data()), message.size());
+        MDEBUG("Sending " << endpoint << " request (" << message.size() << " bytes): " << payload);
+      };
+      // log_rpc_request(endpoint, msg);
+
       while (!(sent = client.send(std::move(msg), std::chrono::seconds{1})))
       {
         // Run possible SIGINT handler
@@ -1114,6 +1162,9 @@ namespace lws
       req.start_height = 0;
       req.known_hashes = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_chain_sync());
 
+      constexpr std::uint64_t quick_sync_progress_step = 10000;
+      std::uint64_t next_quick_sync_log_height = quick_sync_progress_step;
+
       for (;;)
       {
         if (req.known_hashes.empty())
@@ -1123,13 +1174,36 @@ namespace lws
         if (!resp)
           return resp.error();
 
+        MDEBUG("Received get_hashes_fast response (" << resp->hashes.size() << " hashes, current_height: " << resp->current_height << ", start_height: " << resp->start_height << ")");
+
         //
         // exit loop if it appears we have synced to top of chain
         //
         if (resp->hashes.size() <= 1 || resp->hashes.back() == req.known_hashes.front())
+        {
+          if (resp->current_height != 0)
+            MINFO("Quick blockchain sync progress: " << resp->current_height << "/" << resp->current_height << " (100%)");
           return {std::move(client)};
+        }
 
         MONERO_CHECK(disk.sync_chain(db::block_id(resp->start_height), epee::to_span(resp->hashes)));
+        const std::uint64_t synced_height = resp->start_height + resp->hashes.size() - 1;
+        if (resp->current_height != 0 && (synced_height >= next_quick_sync_log_height || synced_height >= (resp->current_height - 1)))
+        {
+          std::uint64_t percent = 100;
+          if (synced_height < resp->current_height)
+          {
+            if (synced_height <= (std::numeric_limits<std::uint64_t>::max() / 100))
+              percent = (synced_height * 100) / resp->current_height;
+            else
+              percent = 99;
+          }
+          MINFO("Quick blockchain sync progress: " << synced_height << "/" << resp->current_height << " (" << percent << "%)");
+          if (std::numeric_limits<std::uint64_t>::max() - quick_sync_progress_step <= synced_height)
+            next_quick_sync_log_height = std::numeric_limits<std::uint64_t>::max();
+          else
+            next_quick_sync_log_height = synced_height + quick_sync_progress_step;
+        }
 
         req.known_hashes.erase(req.known_hashes.begin(), --(req.known_hashes.end()));
         for (std::size_t num = 0; num < 10; ++num)
@@ -1153,6 +1227,9 @@ namespace lws
       req.start_height = 0;
       req.block_ids = MONERO_UNWRAP(MONERO_UNWRAP(disk.start_read()).get_pow_sync());
       req.prune = true;
+
+      constexpr std::uint64_t sync_progress_step = 10000;
+      std::uint64_t next_sync_log_height = sync_progress_step;
 
       std::vector<crypto::hash> new_hashes{};
       std::vector<db::pow_sync> new_pow{};
@@ -1265,7 +1342,27 @@ namespace lws
         } // for every tx in block
 
         MONERO_CHECK(disk.sync_pow(db::block_id(resp->start_height), epee::to_span(new_hashes), epee::to_span(new_pow)));
-        MINFO("Verified up to block " << (resp->start_height + new_hashes.size() - 1) << " with hash " << hash << " and difficulty " << diff_for_check);
+        const std::uint64_t synced_height = resp->start_height + new_hashes.size() - 1;
+        if (resp->current_height != 0 && (synced_height >= next_sync_log_height || synced_height >= (resp->current_height - 1)))
+        {
+          std::uint64_t percent = 100;
+          if (synced_height < resp->current_height)
+          {
+            if (synced_height <= (std::numeric_limits<std::uint64_t>::max() / 100))
+              percent = (synced_height * 100) / resp->current_height;
+            else
+              percent = 99;
+          }
+          MINFO("Blockchain sync progress: " << synced_height << "/" << resp->current_height << " (" << percent << "%) with hash " << hash << " and difficulty " << diff_for_check);
+          if (std::numeric_limits<std::uint64_t>::max() - sync_progress_step <= synced_height)
+            next_sync_log_height = std::numeric_limits<std::uint64_t>::max();
+          else
+            next_sync_log_height = synced_height + sync_progress_step;
+        }
+        else
+        {
+          MINFO("Verified up to block " << synced_height << " with hash " << hash << " and difficulty " << diff_for_check);
+        }
 
       } // for until sync
 

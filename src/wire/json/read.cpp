@@ -92,7 +92,7 @@ namespace
     case rapidjson::kParseErrorTermination: // the handler returned false
       break;
     }
-    WIRE_DLOG_THROW(expected, "near '" << text << '\'');
+    WIRE_DLOG_THROW(expected, "near '" << text << '\'' << reinterpret_cast<const char*>(source.data()));
   }
 }
 
@@ -345,6 +345,21 @@ namespace wire
     const boost::string_ref value = get_next_string();
     if (!hex_to_buffer(dest, value))
       WIRE_DLOG_THROW(error::schema::fixed_binary, "of size" << dest.size() * 2 << " but got " << value.size());
+  }
+
+  std::vector<std::uint8_t> json_reader::binary_array()
+  {
+    std::vector<std::uint8_t> out;
+    const std::size_t count = start_array(0);
+    for (std::size_t i = 0; !is_array_end(i); ++i)
+    {
+      const std::uintmax_t value = unsigned_integer();
+      if (value > 255)
+        WIRE_DLOG_THROW_(error::schema::binary);
+      out.push_back(static_cast<std::uint8_t>(value));
+    }
+    decrement_depth();
+    return out;
   }
 
   std::size_t json_reader::start_array(std::size_t)

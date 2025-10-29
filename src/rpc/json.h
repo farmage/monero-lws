@@ -27,6 +27,9 @@
 
 #include "wire/json.h"
 #include "wire/wrapper/variant.h"
+#include <rapidjson/document.h>
+#include <rapidjson/stringbuffer.h>
+#include <rapidjson/writer.h>
 
 namespace lws
 {
@@ -41,7 +44,7 @@ namespace rpc
       : id(0), method(method)
     {}
     
-    unsigned id;
+    std::string id;
     const char* method; //!< Must be in static memory
   };
   constexpr const char json_request_base::jsonrpc[];
@@ -87,7 +90,7 @@ namespace rpc
   {
     json_response() = delete;
 
-    unsigned id;
+    std::string id;
     boost::variant<json_error, R> state;
   };
 
@@ -116,10 +119,51 @@ namespace rpc
 
   //! \tparam M must implement the METHOD concept.
   template<typename M, typename R = typename M::response>
-  inline expect<R> parse_json_response(std::string&& source)
+  inline expect<R> parse_json_response(std::string source)
   {
     json_response<R> out{};
-    std::error_code error = wire::json::from_bytes(std::move(source), out);
+    rapidjson::Document doc;
+    std::string patched;
+    if (!doc.Parse(source.c_str()).HasParseError())
+    {
+      auto ensure_string_id = [&doc](rapidjson::Value& value) -> void
+      {
+        if (value.IsString())
+          return;
+
+        std::string id_string;
+        if (value.IsUint64())
+          id_string = std::to_string(value.GetUint64());
+        else if (value.IsInt64())
+          id_string = std::to_string(value.GetInt64());
+        else if (value.IsBool())
+          id_string = value.GetBool() ? "true" : "false";
+        else if (value.IsNull())
+          id_string.clear();
+        else
+          id_string = value.IsNumber() ? std::to_string(value.GetDouble()) : "";
+
+        value.SetString(id_string.c_str(), static_cast<rapidjson::SizeType>(id_string.size()), doc.GetAllocator());
+      };
+
+      if (doc.HasMember("id"))
+        ensure_string_id(doc["id"]);
+      else
+      {
+        rapidjson::Value id_value;
+        id_value.SetString("", doc.GetAllocator());
+        doc.AddMember(rapidjson::StringRef("id"), id_value, doc.GetAllocator());
+      }
+
+      rapidjson::StringBuffer buffer;
+      rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+      doc.Accept(writer);
+      patched.assign(buffer.GetString(), buffer.GetSize());
+    }
+    else
+      patched = source;
+
+    std::error_code error = wire::json::from_bytes(std::move(patched), out);
     if (error)
       return error;
 
