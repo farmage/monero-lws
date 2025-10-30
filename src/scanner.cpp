@@ -138,6 +138,15 @@ namespace lws
       return !user_db || user_db->scan_height != user.scan_height();
     }
 
+    std::string obfuscate_address(const std::string& address)
+    {
+      constexpr std::size_t head = 6;
+      constexpr std::size_t tail = 6;
+      if (address.size() <= head + tail + 3)
+        return address;
+      return address.substr(0, head) + "..." + address.substr(address.size() - tail);
+    }
+
     bool send(rpc::client& client, epee::byte_slice message)
     {
       const expect<void> sent = client.send(std::move(message), send_timeout);
@@ -981,8 +990,43 @@ namespace lws
             MINFO("On chain with hash " << blockchain.back() << " and difficulty " << diff << " at height " << fetched->start_height);
           }
 
+          const db::block_id new_height = db::block_id(fetched->start_height);
+          const std::uint64_t tip_height = fetched->current_height;
           for (account& user : users)
-            user.updated(db::block_id(fetched->start_height));
+          {
+            const std::string masked = obfuscate_address(user.address());
+            const std::uint64_t previous_height = std::uint64_t(user.scan_height());
+            const std::uint64_t updated_height = std::uint64_t(new_height);
+            const std::uint64_t processed_blocks =
+              updated_height > previous_height ? (updated_height - previous_height) : 0;
+            std::uint64_t progress = 0;
+            if (tip_height)
+            {
+              if (updated_height >= tip_height)
+                progress = 100;
+              else if (updated_height <= (std::numeric_limits<std::uint64_t>::max() / 100))
+                progress = (updated_height * 100) / tip_height;
+              else
+                progress = 99;
+            }
+
+            std::string tip_summary;
+            if (tip_height)
+              tip_summary = " / " + std::to_string(tip_height) + " (" + std::to_string(progress) + "%)";
+            else
+              tip_summary = " (tip unknown)";
+
+            MINFO(
+              "Account " << masked
+              << " height " << previous_height << " -> " << updated_height
+              << tip_summary
+              << ", +" << processed_blocks << " block(s)"
+              << " [new outputs: " << user.outputs().size()
+              << ", new spends: " << user.spends().size() << "]"
+            );
+
+            user.updated(new_height);
+          }
         }
       }
 
