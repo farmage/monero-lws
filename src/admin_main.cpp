@@ -26,6 +26,8 @@
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <algorithm>
+#include <chrono>
+#include <optional>
 #include <boost/optional/optional.hpp>
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/parsers.hpp>
@@ -41,9 +43,11 @@
 #include <utility>
 #include <vector>
 
+#include "block_cache.h"
 #include "common/command_line.h" // monero/src
 #include "common/expect.h"       // monero/src
 #include "config.h"
+#include "cryptonote_config.h"   // monero/src
 #include "error.h"
 #include "compat/hex.h"
 #include "db/storage.h"
@@ -51,6 +55,7 @@
 #include "options.h"
 #include "misc_log_ex.h"  // monero/contrib/epee/include
 #include "rpc/admin.h"
+#include "rpc/client.h"
 #include "span.h"         // monero/contrib/epee/include
 #include "string_tools.h" // monero/contrib/epee/include
 #include "wire/adapted/crypto.h"
@@ -61,6 +66,22 @@
 
 namespace
 {
+  std::string default_daemon_address()
+  {
+    static constexpr const char base[] = "tcp://127.0.0.1:";
+    switch (lws::config::network)
+    {
+    case cryptonote::TESTNET:
+      return base + std::to_string(config::testnet::ZMQ_RPC_DEFAULT_PORT);
+    case cryptonote::STAGENET:
+      return base + std::to_string(config::stagenet::ZMQ_RPC_DEFAULT_PORT);
+    case cryptonote::MAINNET:
+    default:
+      break;
+    }
+    return base + std::to_string(config::ZMQ_RPC_DEFAULT_PORT);
+  }
+
   // wrapper for custom output for admin accounts
   template<typename T>
   struct admin_display
@@ -99,12 +120,16 @@ namespace
     const command_line::arg_descriptor<bool> show_sensitive;
     const command_line::arg_descriptor<std::string> command;
     const command_line::arg_descriptor<std::vector<std::string>> arguments;
+    const command_line::arg_descriptor<std::string> daemon_rpc;
+    const command_line::arg_descriptor<std::string> daemon_sub;
 
     options()
       : lws::options()
       , show_sensitive{"show-sensitive", "Show view keys", false}
       , command{"command", "Admin command to execute", ""}
       , arguments{"arguments", "Arguments to command"}
+      , daemon_rpc{"daemon", "<protocol>://<address>:<port> of a monerod ZMQ RPC", ""}
+      , daemon_sub{"sub", "tcp://address:port or ipc://path of a monerod ZMQ Pub (optional)", ""}
     {}
 
     void prepare(boost::program_options::options_description& description) const
@@ -113,6 +138,8 @@ namespace
       command_line::add_arg(description, show_sensitive);
       command_line::add_arg(description, command);
       command_line::add_arg(description, arguments);
+      command_line::add_arg(description, daemon_rpc);
+      command_line::add_arg(description, daemon_sub);
     }
   };
 
@@ -121,6 +148,8 @@ namespace
     lws::db::storage disk;
     std::vector<std::string> arguments;
     bool show_sensitive;
+    std::string daemon_rpc;
+    std::string daemon_sub;
   };
 
   crypto::secret_key get_key(std::string const& hex)
@@ -199,6 +228,79 @@ namespace
 
     auto reader = prog.disk.start_read().value();
     reader.json_debug(out, prog.show_sensitive);
+  }
+
+  void verify_cache(program prog, std::ostream& out)
+  {
+    std::uint64_t start_height = 0;
+    std::size_t count = 10000;
+
+    if (!prog.arguments.empty())
+      start_height = std::stoull(prog.arguments[0]);
+    if (1 < prog.arguments.size())
+      count = std::stoull(prog.arguments[1]);
+    if (count == 0)
+      throw std::runtime_error{"verify_cache requires count > 0"};
+
+    if (prog.daemon_rpc.empty())
+      prog.daemon_rpc = default_daemon_address();
+
+    auto ctx = lws::rpc::context::make(
+      prog.daemon_rpc,
+      prog.daemon_sub,
+      {},
+      {},
+      std::chrono::minutes{0},
+      false
+    );
+
+    auto client = MONERO_UNWRAP(ctx.connect());
+    auto status = lws::block_cache::verify(prog.disk, std::move(client), start_height, count);
+    if (!status)
+      MONERO_THROW(status.error(), "Cache verification failed");
+
+    wire::json_stream_writer json{out};
+    wire::object(json,
+      wire::field("start_height", start_height),
+      wire::field("count", count),
+      wire::field("status", std::string{"ok"})
+    );
+    json.finish();
+  }
+
+  void force_sync(program prog, std::ostream& out)
+  {
+    std::uint64_t start_height = 0;
+    std::optional<std::uint64_t> stop_height;
+    if (!prog.arguments.empty())
+      start_height = std::stoull(prog.arguments[0]);
+    if (2 <= prog.arguments.size())
+      stop_height = std::stoull(prog.arguments[1]);
+    if (stop_height && *stop_height < start_height)
+      throw std::runtime_error{"stop_height must be greater than or equal to start_height"};
+
+    if (prog.daemon_rpc.empty())
+      prog.daemon_rpc = default_daemon_address();
+
+    auto ctx = lws::rpc::context::make(
+      prog.daemon_rpc,
+      prog.daemon_sub,
+      {},
+      {},
+      std::chrono::minutes{0},
+      false
+    );
+
+    auto client = MONERO_UNWRAP(ctx.connect());
+    auto result = MONERO_UNWRAP(lws::block_cache::warm(prog.disk, std::move(client), start_height, stop_height));
+
+    wire::json_stream_writer json{out};
+    wire::object(json,
+      wire::field("cached_from", result.cached_from),
+      wire::field("cached_to", result.cached_to),
+      wire::field("batches", result.batches)
+    );
+    json.finish();
   }
 
   void list_accounts(program prog, std::ostream& out)
@@ -323,6 +425,7 @@ namespace
     {"add_account",           &add_account,     "<base58 address> <view key hex>"},
     {"create_admin",          &create_admin,    ""},
     {"debug_database",        &debug_database,  ""},
+    {"force_sync",            &force_sync,      "[start_height] [stop_height]"},
     {"list_accounts",         &list_accounts,   ""},
     {"list_admin",            &list_admin,      ""},
     {"list_requests",         &list_requests,   ""},
@@ -330,6 +433,7 @@ namespace
     {"reject_requests",       &reject_requests, "<\"create\"|\"import\"> <base58 address> [base 58 address]..."},
     {"rescan",                &rescan,          "<height> <base58 address> [base 58 address]..."},
     {"rollback",              &rollback,        "<height>"},
+    {"verify_cache",          &verify_cache,    "[start_height] [count]"},
     {"webhook_delete",        &webhook_delete,  "<base58 address> [base 58 address]..."},
     {"webhook_delete_uuid",   &webhook_delete_uuid, "<event_id> [event_id]..."}
   };
@@ -383,6 +487,8 @@ namespace
     };
 
     prog.show_sensitive = command_line::get_arg(args, opts.show_sensitive);
+    prog.daemon_rpc = command_line::get_arg(args, opts.daemon_rpc);
+    prog.daemon_sub = command_line::get_arg(args, opts.daemon_sub);
     auto cmd = args[opts.command.name];
     if (cmd.empty())
       throw std::runtime_error{"No command given"};
@@ -433,13 +539,16 @@ int main (int argc, char** argv)
 {
   try
   {
-    mlog_configure("", false, 0, 0); // disable logging
-
     boost::optional<std::pair<std::string, program>> prog;
+    bool enable_console_logs = false;
 
     try
     {
       prog = get_program(argc, argv);
+      if (prog && prog->first == "force_sync")
+        enable_console_logs = true;
+      else if (prog && prog->first == "verify_cache")
+        enable_console_logs = true;
     }
     catch (std::exception const& e)
     {
@@ -447,6 +556,10 @@ int main (int argc, char** argv)
       print_help(std::cerr);
       return EXIT_FAILURE;
     }
+
+    mlog_configure("", enable_console_logs, 0, 0);
+    if (enable_console_logs)
+      mlog_set_categories("*:INFO");
 
     if (prog)
       run(prog->first, std::move(prog->second), std::cout);

@@ -301,6 +301,9 @@ namespace db
     constexpr const lmdb::basic_table<unsigned, block_pow> pows{
       "pow_by_id", (MDB_CREATE | MDB_DUPSORT), MONERO_SORT_BY(block_pow, id)
     };
+    constexpr const lmdb::msgpack_table<block_id, block_cache_metadata, block_cache_value> block_cache_table{
+      "block_cache_by_start_height", MDB_CREATE
+    };
     constexpr const lmdb::basic_table<account_status, account> accounts{
       "accounts_by_status,id", (MDB_CREATE | MDB_DUPSORT), MONERO_SORT_BY(account, id)
     };
@@ -659,6 +662,7 @@ namespace db
     struct tables_
     {
       MDB_dbi blocks;
+      MDB_dbi block_cache;
       MDB_dbi pows;
       MDB_dbi accounts;
       MDB_dbi accounts_ba;
@@ -682,6 +686,7 @@ namespace db
       assert(txn != nullptr);
 
       tables.blocks      = blocks.open(*txn).value();
+      tables.block_cache = block_cache_table.open(*txn).value();
       tables.pows        = pows.open(*txn).value();
       tables.accounts    = accounts.open(*txn).value();
       tables.accounts_ba = accounts_by_address.open(*txn).value();
@@ -761,6 +766,87 @@ namespace db
     assert(curs.blocks_cur != nullptr);
 
     return do_get_block_hash(*curs.blocks_cur, height);
+  }
+
+  expect<std::optional<block_cache_value>> storage_reader::get_block_cache(block_id start_height) noexcept
+  {
+    MONERO_PRECOND(txn != nullptr);
+    assert(db != nullptr);
+
+    MONERO_CHECK(check_cursor(*txn, db->tables.block_cache, curs.block_cache_cur));
+    assert(curs.block_cache_cur != nullptr);
+
+    MDB_val key = lmdb::to_val(start_height);
+    MDB_val value{};
+    const int err = mdb_cursor_get(curs.block_cache_cur.get(), &key, &value, MDB_SET);
+    if (err)
+    {
+      if (err == MDB_NOTFOUND)
+        return std::optional<block_cache_value>{};
+      return {lmdb::error(err)};
+    }
+
+    auto cached = block_cache_table.get_value(value);
+    if (!cached)
+      return cached.error();
+
+    if (cached->first.version != block_cache_version)
+      return std::optional<block_cache_value>{};
+
+    return std::optional<block_cache_value>{std::move(cached->second)};
+  }
+
+  expect<std::optional<std::pair<block_id, block_cache_value>>> storage_reader::get_block_cache_span(block_id height) noexcept
+  {
+    MONERO_PRECOND(txn != nullptr);
+    assert(db != nullptr);
+
+    MONERO_CHECK(check_cursor(*txn, db->tables.block_cache, curs.block_cache_cur));
+    assert(curs.block_cache_cur != nullptr);
+
+    MDB_val key = lmdb::to_val(height);
+    MDB_val value{};
+    int err = mdb_cursor_get(curs.block_cache_cur.get(), &key, &value, MDB_SET_RANGE);
+    if (err == MDB_NOTFOUND)
+    {
+      err = mdb_cursor_get(curs.block_cache_cur.get(), &key, &value, MDB_LAST);
+      if (err == MDB_NOTFOUND)
+        return std::optional<std::pair<block_id, block_cache_value>>{};
+      if (err)
+        return {lmdb::error(err)};
+    }
+    else if (err)
+      return {lmdb::error(err)};
+
+    auto current_start = block_cache_table.get_key(key);
+    if (!current_start)
+      return current_start.error();
+
+    if (lmdb::to_native(*current_start) > lmdb::to_native(height))
+    {
+      const int prev_err = mdb_cursor_get(curs.block_cache_cur.get(), &key, &value, MDB_PREV);
+      if (prev_err == MDB_NOTFOUND)
+        return std::optional<std::pair<block_id, block_cache_value>>{};
+      if (prev_err)
+        return {lmdb::error(prev_err)};
+      current_start = block_cache_table.get_key(key);
+      if (!current_start)
+        return current_start.error();
+    }
+
+    if (lmdb::to_native(*current_start) > lmdb::to_native(height))
+      return std::optional<std::pair<block_id, block_cache_value>>{};
+
+    auto cached = block_cache_table.get_value(value);
+    if (!cached)
+      return cached.error();
+
+    if (cached->first.version != block_cache_version)
+      return std::optional<std::pair<block_id, block_cache_value>>{};
+
+    return std::optional<std::pair<block_id, block_cache_value>>{
+      std::make_pair(*current_start, std::move(cached->second))
+    };
   }
 
   expect<std::list<crypto::hash>> storage_reader::get_chain_sync()
@@ -1866,6 +1952,49 @@ namespace db
       MONERO_CHECK(append_block_hashes(*blocks_cur, db::block_id(current), chain));
       return append_pow(*pow_cur, db::block_id(current), boost::make_iterator_range(first_pow, pow.end()));
    });
+  }
+
+  expect<void> storage::store_block_cache(block_id start_height, const block_cache_value& value)
+  {
+    MONERO_PRECOND(db != nullptr);
+    return db->try_write([this, start_height, &value] (MDB_txn& txn) -> expect<void>
+    {
+      cursor::block_cache cache_cur;
+      MONERO_CHECK(check_cursor(txn, this->db->tables.block_cache, cache_cur));
+
+      const block_cache_metadata meta{block_cache_version, 0};
+      const expect<epee::byte_slice> bytes = block_cache_table.make_value(meta, value);
+      if (!bytes)
+        return bytes.error();
+
+      MDB_val key = lmdb::to_val(start_height);
+      MDB_val data{bytes->size(), const_cast<void*>(static_cast<const void*>(bytes->data()))};
+      MONERO_LMDB_CHECK(mdb_cursor_put(cache_cur.get(), &key, &data, 0));
+      return success();
+    });
+  }
+
+  expect<void> storage::erase_block_cache(block_id start_height)
+  {
+    MONERO_PRECOND(db != nullptr);
+    return db->try_write([this, start_height] (MDB_txn& txn) -> expect<void>
+    {
+      cursor::block_cache cache_cur;
+      MONERO_CHECK(check_cursor(txn, this->db->tables.block_cache, cache_cur));
+
+      MDB_val key = lmdb::to_val(start_height);
+      MDB_val value{};
+      const int err = mdb_cursor_get(cache_cur.get(), &key, &value, MDB_SET);
+      if (err)
+      {
+        if (err == MDB_NOTFOUND)
+          return success();
+        return {lmdb::error(err)};
+      }
+
+      MONERO_LMDB_CHECK(mdb_cursor_del(cache_cur.get(), 0));
+      return success();
+    });
   }
 
   namespace

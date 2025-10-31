@@ -47,6 +47,37 @@
 #include "wire/traits.h"
 #include "wire/wrapper/array.h"
 
+namespace wire
+{
+  struct relaxed_min_element_size : std::integral_constant<std::size_t, 1>
+  {
+    static constexpr std::size_t max_bytes() noexcept { return std::numeric_limits<std::size_t>::max(); }
+
+    template<typename T>
+    static constexpr bool check() noexcept { return true; }
+  };
+
+  template<typename R, typename T>
+  struct default_min_element_size<R, T, std::enable_if_t<std::is_base_of<wire::reader, R>::value && std::is_integral<T>::value && !std::is_same<T, bool>::value>>
+    : relaxed_min_element_size
+  {};
+
+  template<typename R>
+  struct default_min_element_size<R, std::string, std::enable_if_t<std::is_base_of<wire::reader, R>::value>>
+    : relaxed_min_element_size
+  {};
+
+  template<typename R>
+  struct default_min_element_size<R, std::vector<std::uint64_t>, std::enable_if_t<std::is_base_of<wire::reader, R>::value>>
+    : relaxed_min_element_size
+  {};
+
+  template<typename R>
+  struct default_min_element_size<R, std::vector<std::vector<std::uint64_t>>, std::enable_if_t<std::is_base_of<wire::reader, R>::value>>
+    : relaxed_min_element_size
+  {};
+}
+
 namespace lws
 {
 namespace db
@@ -217,6 +248,30 @@ namespace db
   };
   static_assert(sizeof(block_pow) == 8 * 4, "padding in blow_pow");
   WIRE_DECLARE_OBJECT(block_pow);
+
+  struct block_cache_metadata
+  {
+    std::uint32_t version;
+    std::uint32_t reserved;
+  };
+  static_assert(sizeof(block_cache_metadata) == 8, "unexpected block_cache_metadata size");
+
+  struct block_cache_block
+  {
+    std::string block_blob;
+    std::vector<std::string> tx_blobs;
+    std::vector<std::vector<std::uint64_t>> output_indices;
+  };
+  WIRE_DECLARE_OBJECT(block_cache_block);
+
+  struct block_cache_value
+  {
+    std::vector<block_cache_block> blocks;
+    std::uint64_t current_height;
+  };
+  WIRE_DECLARE_OBJECT(block_cache_value);
+
+  constexpr const std::uint32_t block_cache_version = 2;
 
   //! Used during sync "check-ins" if --untrusted-daemon
   struct pow_sync

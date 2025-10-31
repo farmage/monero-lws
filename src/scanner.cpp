@@ -37,6 +37,7 @@
 #include <chrono>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <string>
 #include <type_traits>
@@ -56,6 +57,7 @@
 #include "cryptonote_basic/cryptonote_format_utils.h" // monero/src
 #include "db/account.h"
 #include "db/data.h"
+#include "block_cache.h"
 #include "cryptonote_basic/difficulty.h"              // monero/src
 #include "error.h"
 #include "cryptonote_basic/hardfork.h"   // monero/src
@@ -86,7 +88,7 @@ namespace lws
   {
     namespace enet = epee::net_utils;
 
-    constexpr const std::chrono::minutes block_rpc_timeout{2};
+    constexpr const std::chrono::minutes block_rpc_timeout{3};
     constexpr const std::chrono::seconds send_timeout{30};
     constexpr const std::chrono::seconds sync_rpc_timeout{30};
 
@@ -102,6 +104,9 @@ namespace lws
       std::shared_ptr<rpc::scanner::queue> queue;
       scanner_options opts;
     };
+
+    template<typename R, typename Q>
+    expect<typename R::response> fetch_chain(scanner_sync& self, rpc::client& client, const char* endpoint, const Q& req);
  
     bool is_new_block(std::string&& chain_msg, std::optional<db::storage>& disk, const account& user)
     {
@@ -198,6 +203,135 @@ namespace lws
     for (const auto& value : source)
       result.push_back(value.convert_to<cryptonote::difficulty_type>());
     return result;
+  }
+
+  std::uint64_t get_cached_tip_height(db::storage& disk)
+  {
+    auto reader = disk.start_read();
+    if (!reader)
+    {
+      MWARNING("Failed to start DB read while refreshing cached response tip height: " << reader.error().message());
+      return std::uint64_t{0};
+    }
+
+    auto last_block = reader->get_last_block();
+    if (!last_block)
+    {
+      MWARNING("Failed to read last block while refreshing cached response tip height: " << last_block.error().message());
+      reader->finish_read();
+      return std::uint64_t{0};
+    }
+
+    const std::uint64_t height = std::uint64_t(last_block->id);
+    auto suspended = reader->finish_read();
+    (void)suspended;
+    return height;
+  }
+
+  expect<std::optional<rpc::get_blocks_fast_response>>
+  finalize_cached_fetch(db::storage& disk, std::uint64_t requested_height, rpc::get_blocks_fast_response response)
+  {
+    if (response.blocks.empty())
+      return std::optional<rpc::get_blocks_fast_response>{};
+    if (response.blocks.size() != response.output_indices.size())
+      return std::optional<rpc::get_blocks_fast_response>{};
+
+    response.start_height = requested_height;
+
+    auto reader = disk.start_read();
+    if (!reader)
+      return reader.error();
+
+    auto expected = reader->get_block_hash(db::block_id(requested_height));
+    if (!expected)
+    {
+      auto suspended = reader->finish_read();
+      (void)suspended;
+      return expected.error();
+    }
+
+    crypto::hash cached_hash{};
+    if (!cryptonote::get_block_hash(response.blocks.front().block, cached_hash))
+    {
+      auto suspended = reader->finish_read();
+      (void)suspended;
+      return std::optional<rpc::get_blocks_fast_response>{};
+    }
+
+    auto suspended = reader->finish_read();
+    (void)suspended;
+
+    if (*expected != cached_hash)
+      return std::optional<rpc::get_blocks_fast_response>{};
+
+    if (const std::uint64_t tip_height = get_cached_tip_height(disk))
+      response.current_height = tip_height;
+
+    return std::optional<rpc::get_blocks_fast_response>{std::move(response)};
+  }
+
+  expect<std::optional<rpc::get_blocks_fast_response>>
+  emulate_cached_fetch(db::storage& disk, std::uint64_t requested_height)
+  {
+    if (requested_height == 0)
+      requested_height = 1;
+
+    constexpr std::size_t cache_batch_size = 1000;
+    const std::uint64_t aligned_start = std::max<std::uint64_t>(1, (requested_height / cache_batch_size) * cache_batch_size);
+
+    auto primary_cached = block_cache::load(disk, aligned_start);
+    if (!primary_cached)
+      return primary_cached.error();
+    if (!*primary_cached)
+      return std::optional<rpc::get_blocks_fast_response>{};
+
+    auto result = std::move(**primary_cached);
+    if (result.blocks.size() != result.output_indices.size())
+      return std::optional<rpc::get_blocks_fast_response>{};
+
+    if (result.blocks.size() < cache_batch_size)
+      return finalize_cached_fetch(disk, requested_height, std::move(result));
+
+    const std::uint64_t skip = requested_height > aligned_start ? requested_height - aligned_start : 0;
+    if (skip)
+    {
+      if (result.blocks.size() <= skip)
+        return std::optional<rpc::get_blocks_fast_response>{};
+      result.blocks.erase(result.blocks.begin(), result.blocks.begin() + static_cast<std::size_t>(skip));
+      result.output_indices.erase(result.output_indices.begin(), result.output_indices.begin() + static_cast<std::size_t>(skip));
+    }
+
+    if (result.blocks.size() < cache_batch_size)
+    {
+      const std::uint64_t next_aligned = aligned_start + cache_batch_size;
+      auto next_cached = block_cache::load(disk, next_aligned);
+      if (!next_cached)
+        return next_cached.error();
+      if (*next_cached)
+      {
+        auto& appended = **next_cached;
+        if (appended.blocks.size() == appended.output_indices.size() && appended.blocks.size() >= 1)
+        {
+          const std::size_t need = cache_batch_size - result.blocks.size();
+          const std::size_t take = std::min<std::size_t>(need, appended.blocks.size());
+          for (std::size_t i = 0; i < take; ++i)
+          {
+            result.blocks.push_back(std::move(appended.blocks[i]));
+            result.output_indices.push_back(std::move(appended.output_indices[i]));
+          }
+          if (result.blocks.size() > cache_batch_size)
+          {
+            result.blocks.resize(cache_batch_size);
+            result.output_indices.resize(cache_batch_size);
+          }
+        }
+      }
+    }
+
+    if (result.blocks.empty())
+      return std::optional<rpc::get_blocks_fast_response>{};
+
+    return finalize_cached_fetch(disk, requested_height, std::move(result));
   }
 
     void send_spend_hook(boost::asio::io_context& io, rpc::client& client, net::http::client& http, const epee::span<const db::webhook_tx_spend> events)
@@ -684,19 +818,6 @@ namespace lws
         req.prune = false; // always get full blocks to scan outputs properly
 
 
-        const auto log_rpc_request = [](const char* endpoint, const epee::byte_slice& message)
-        {
-          std::string payload;
-          if (!message.empty())
-            payload.assign(reinterpret_cast<const char*>(message.data()), message.size());
-          MDEBUG("Sending " << endpoint << " request (" << message.size() << " bytes): " << payload);
-        };
-
-        epee::byte_slice block_request = rpc::client::make_message("get_blocks_fast", req);
-        // log_rpc_request("get_blocks_fast", block_request);
-        if (!send(client, block_request.clone()))
-          return false;
-
         constexpr std::uint64_t scan_progress_step = 5000;
         std::uint64_t next_scan_log_height = scan_progress_step;
 
@@ -713,22 +834,46 @@ namespace lws
           blockchain.clear();
           new_pow.clear();
 
-          auto resp = client.get_message(block_rpc_timeout);
-          if (!resp)
+          std::unique_ptr<rpc::get_blocks_fast_response> fetched;
+          const bool can_use_cache = static_cast<bool>(disk);
+
+          if (can_use_cache)
           {
-            const bool timeout = resp.matches(std::errc::timed_out);
-            if (timeout)
-              MWARNING("Block retrieval timeout, resetting scanner");
-            if (timeout || resp.matches(std::errc::interrupted))
+            auto cached = emulate_cached_fetch(*disk, req.start_height);
+            if (!cached)
               return false;
-            MONERO_THROW(resp.error(), "Failed to retrieve blocks from daemon");
+            if (*cached)
+              fetched = std::make_unique<rpc::get_blocks_fast_response>(std::move(**cached));
           }
 
-          auto fetched = rpc::parse_json_response<rpc::get_blocks_fast>(std::move(*resp));
           if (!fetched)
           {
-            MERROR("Failed to retrieve next blocks: " << fetched.error().message() << ". Resetting state and trying again");
-            return false;
+            auto network = fetch_chain<rpc::get_blocks_fast>(self, client, "get_blocks_fast", req);
+            if (!network)
+            {
+              if (network.matches(std::errc::timed_out))
+              {
+                MWARNING("Block retrieval timeout, resetting scanner");
+                return false;
+              }
+              if (network == lws::error::daemon_timeout)
+              {
+                MWARNING("Failed to retrieve blocks from daemon, resetting scanner");
+                return false;
+              }
+              if (network.matches(std::errc::interrupted))
+                return false;
+              MONERO_THROW(network.error(), "Failed to retrieve blocks from daemon");
+            }
+
+            fetched = std::make_unique<rpc::get_blocks_fast_response>(std::move(*network));
+
+            if (can_use_cache)
+            {
+              auto stored = block_cache::store(*disk, req.start_height, *fetched);
+              if (!stored)
+                MWARNING("Failed to cache blocks at height " << req.start_height << ": " << stored.error().message());
+            }
           }
 
           if (fetched->blocks.empty())
@@ -762,7 +907,7 @@ namespace lws
               );
               resort = true;
             }
-  
+
             if (resort)
             {
               assert(!users.empty()); // by logic from above
@@ -771,11 +916,7 @@ namespace lws
               if (std::uint64_t(oldest) < fetched->start_height)
               {
                 req.start_height = std::uint64_t(oldest);
-                block_request = rpc::client::make_message("get_blocks_fast", req);
-                // log_rpc_request("get_blocks_fast", block_request);
-                if (!send(client, block_request.clone()))
-                  return false;
-                continue; // to next get_blocks_fast read
+                continue; // to next iteration to fetch adjusted range
               }
               // else, the oldest new account is within the newly fetch range
             }
@@ -783,7 +924,6 @@ namespace lws
 
           // prep for next blocks retrieval
           req.start_height = fetched->start_height + fetched->blocks.size() - 1;
-          block_request = rpc::client::make_message("get_blocks_fast", req);
 
           if (fetched->blocks.size() <= 1)
           {
@@ -792,7 +932,11 @@ namespace lws
             {
               expect<std::vector<std::pair<rpc::client::topic, std::string>>> new_pubs = client.wait_for_block();
               if (new_pubs.matches(std::errc::interrupted))
-                return false; // reset entire state (maybe shutdown)
+              {
+                if (self.stop_)
+                  return false;
+                continue; // retry wait without re-fetching same height
+              }
 
               if (!new_pubs)
                 break; // exit wait for block loop, and try fetching new blocks
@@ -817,17 +961,8 @@ namespace lws
               }
             } // wait for block
 
-            // request next chunk of blocks
-            // log_rpc_request("get_blocks_fast", block_request);
-            if (!send(client, block_request.clone()))
-              return false;
             continue; // to next get_blocks_fast read
           } // if only one block was fetched
-
-          // request next chunk of blocks
-          // log_rpc_request("get_blocks_fast", block_request);
-          if (!send(client, block_request.clone()))
-            return false;
 
           if (fetched->blocks.size() != fetched->output_indices.size())
             throw std::runtime_error{"Bad daemon response - need same number of blocks and indices"};

@@ -2,5 +2,7 @@
 /build-debug
 /lws-db
 /db-data
+/scripts
 /.venv
+/.vscode
 cmake-log.txt

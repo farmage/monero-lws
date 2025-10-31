@@ -216,13 +216,14 @@ def run_all_probes(
 
 def get_blocks_fast(
     url: str,
-    block_ids: List[str] = [],
+    start_height: int = 1,
     timeout: float = 5.0,
 ) -> Dict[str, Any]:
+    block_ids: List[str] = [],
 
     params = {
-        "block_ids": block_ids,
-        "start_height": 1,
+        "block_ids": [],
+        "start_height": start_height,
         "prune": False,
     }
 
@@ -253,7 +254,7 @@ def main(argv: List[str] | None = None) -> int:
     )
     parser.add_argument("--zmq-port", type=int, default=18282, help="ZMQ RPC port (default: 18282)")
     parser.add_argument("--http-port", type=int, default=18281, help="HTTP JSON-RPC port (default: 18281)")
-    parser.add_argument("--timeout", type=float, default=15.0, help="Timeout for each request (seconds)")
+    parser.add_argument("--timeout", type=float, default=45.0, help="Timeout for each request (seconds)")
     args = parser.parse_args(argv)
 
     host = args.host
@@ -272,10 +273,17 @@ def main(argv: List[str] | None = None) -> int:
 
 
 
-    result = get_blocks_fast(url, [], args.timeout)
+    result = get_blocks_fast(url, 74000, args.timeout)
     response = json.loads(result['response'])
-    with open("get_blocks_fast.json", "w") as f:
+    with open("get_blocks_fast_74000.json", "w") as f:
         json.dump(response, f, indent=2)
+
+    # Print the block count from the response
+    if 'result' in response and 'blocks' in response['result']:
+        block_count = len(response['result']['blocks'])
+        print(f"Block count: {block_count}")
+    else:
+        print("No blocks found in response")
     # print(json.dumps(response, indent=2))
     return 0
 

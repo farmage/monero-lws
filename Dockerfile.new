@@ -1,0 +1,108 @@
+###########################
+# Builder image
+###########################
+FROM ubuntu:22.04 AS builder
+
+ARG CMAKE_BUILD_TYPE=Release
+ARG BUILD_JOBS=0
+
+ENV CCACHE_DIR=/ccache
+
+RUN mkdir -p "${CCACHE_DIR}"
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        pkg-config \
+        libzmq3-dev \
+        libssl-dev \
+        libunbound-dev \
+        libsodium-dev \
+        libunwind8-dev \
+        liblzma-dev \
+        libreadline-dev \
+        libldns-dev \
+        libexpat1-dev \
+        libpgm-dev \
+        qttools5-dev-tools \
+        libhidapi-dev \
+        libusb-1.0-0-dev \
+        libprotobuf-dev \
+        protobuf-compiler \
+        libudev-dev \
+        libboost-chrono-dev \
+        libboost-date-time-dev \
+        libboost-filesystem-dev \
+        libboost-locale-dev \
+        libboost-program-options-dev \
+        libboost-regex-dev \
+        libboost-serialization-dev \
+        libboost-system-dev \
+        libboost-thread-dev \
+        libboost-context-dev \
+        libboost-coroutine-dev \
+        ccache \
+        doxygen \
+        git \
+        graphviz && \
+    rm -rf /var/lib/apt/lists/*
+
+# RUN apt-get install libgtest-dev -y && \
+#     cd /usr/src/gtest && \
+#     cmake . && \
+#     make -j2 && \
+#     mv libg* /usr/lib/
+
+# Cache-busting argument to force rebuild from git clone onwards
+ARG REBUILD_FROM_HERE=0
+
+#    git config --global http.postBuffer 1048576000 && \
+RUN git clone -b master \
+        --depth=1 \
+        --recurse-submodules \
+        --shallow-submodules \
+        --jobs "$(nproc)" \
+        https://github.com/farmage/monero-lws \
+        /xcash-lws && \
+    cd /xcash-lws && \
+    mkdir -p build && \
+    cmake -S . -B build \
+        -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache && \
+    BUILD_THREADS="${BUILD_JOBS:-0}" && \
+    case "${BUILD_THREADS}" in ''|*[!0-9]*) BUILD_THREADS=0 ;; esac && \
+    if [ "${BUILD_THREADS}" -le 0 ]; then BUILD_THREADS="$(nproc)"; fi && \
+    cmake --build build -- -j"${BUILD_THREADS}"
+
+###########################
+# Production image
+###########################
+FROM ubuntu:22.04
+
+WORKDIR /opt/xcash-lws
+
+COPY --from=builder /xcash-lws/build/src/monero-lws* ./
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates tzdata \
+    libstdc++6 libc6 libgcc-s1 \
+    libssl3 \
+    libzmq5 libsodium23 \
+    libboost-program-options1.74.0 \
+    libboost-filesystem1.74.0 \
+    libboost-regex1.74.0 \
+    libboost-chrono1.74.0 \
+    libboost-thread1.74.0 \
+    libboost-context1.74.0 \
+    libboost-coroutine1.74.0 \
+    libicu70 \
+    libbsd0 libpgm-5.3-0 libnorm1 \
+    libgssapi-krb5-2 libkrb5-3 libk5crypto3 libkrb5support0 libcom-err2 libkeyutils1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /data /log
+
+CMD ["./xcash-lws"]

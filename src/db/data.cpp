@@ -27,7 +27,9 @@
 #include "data.h"
 
 #include <cstring>
+#include <functional>
 #include <memory>
+#include <type_traits>
 
 #include "cryptonote_config.h" // monero/src
 #include "compat/xcash_config.h"
@@ -44,7 +46,21 @@
 #include "wire/vector.h"
 #include "wire/wrapper/array.h"
 #include "wire/wrapper/defaulted.h"
+#include "wire/wrapper/trusted_array.h"
 #include "wire/wrappers_impl.h"
+
+namespace wire
+{
+  void read_bytes(wire::reader& source, std::vector<std::uint64_t>& dest)
+  {
+    wire_read::array_unchecked(source, dest, 0, std::numeric_limits<std::size_t>::max());
+  }
+
+  void write_bytes(wire::writer& dest, const std::vector<std::uint64_t>& source)
+  {
+    wire_write::array(dest, source);
+  }
+}
 
 namespace lws
 {
@@ -173,6 +189,40 @@ namespace db
     }
   }
   WIRE_DEFINE_OBJECT(subaddress_map, map_subaddress_map);
+
+  void read_bytes(wire::reader& source, block_cache_block& self)
+  {
+    wire::object(source,
+      wire::field<0>("block_blob", std::ref(self.block_blob)),
+      wire::field<1>("tx_blobs", wire::trusted_array(std::ref(self.tx_blobs))),
+      wire::field<2>("output_indices", wire::trusted_array(std::ref(self.output_indices)))
+    );
+  }
+
+  void write_bytes(wire::writer& dest, const block_cache_block& self)
+  {
+    wire::object(dest,
+      wire::field<0>("block_blob", std::cref(self.block_blob)),
+      wire::field<1>("tx_blobs", wire::as_array(std::cref(self.tx_blobs))),
+      wire::field<2>("output_indices", wire::as_array(std::cref(self.output_indices), wire::as_array))
+    );
+  }
+
+  void read_bytes(wire::reader& source, block_cache_value& self)
+  {
+    wire::object(source,
+      wire::field<0>("blocks", wire::trusted_array(std::ref(self.blocks))),
+      wire::field<1>("current_height", std::ref(self.current_height))
+    );
+  }
+
+  void write_bytes(wire::writer& dest, const block_cache_value& self)
+  {
+    wire::object(dest,
+      wire::field<0>("blocks", wire::as_array(std::cref(self.blocks))),
+      wire::field<1>("current_height", self.current_height)
+    );
+  }
 
   void write_bytes(wire::writer& dest, const account& self, const bool show_key)
   {

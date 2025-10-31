@@ -29,6 +29,7 @@
 #include <iosfwd>
 #include <list>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -58,6 +59,7 @@ namespace db
     MONERO_CURSOR(subaddress_indexes);
 
     MONERO_CURSOR(blocks);
+    MONERO_CURSOR(block_cache);
     MONERO_CURSOR(pow);
     MONERO_CURSOR(accounts_by_address);
     MONERO_CURSOR(accounts_by_height);
@@ -70,6 +72,7 @@ namespace db
   struct reader_internal
   {
     cursor::blocks blocks_cur;
+    cursor::block_cache block_cache_cur;
     cursor::accounts_by_address accounts_ba_cur;
     cursor::accounts_by_height accounts_bh_cur;
   };
@@ -109,6 +112,12 @@ namespace db
 
     //! \return "Our" block hash at `height`.
     expect<crypto::hash> get_block_hash(const block_id height) noexcept;
+
+    //! \return Cached block batch for `start_height` if present.
+    expect<std::optional<block_cache_value>> get_block_cache(block_id start_height) noexcept;
+
+    //! \return Cached block batch whose start height is <= `height`, if present.
+    expect<std::optional<std::pair<block_id, block_cache_value>>> get_block_cache_span(block_id height) noexcept;
 
     //! \return List for `GetHashesFast` to sync blockchain with daemon.
     expect<std::list<crypto::hash>> get_chain_sync();
@@ -238,6 +247,9 @@ namespace db
     expect<void> sync_chain(block_id height, epee::span<const crypto::hash> hashes);
 
     expect<void> sync_pow(block_id height, epee::span<const crypto::hash> hashes, epee::span<const pow_sync> pow);
+
+    expect<void> store_block_cache(block_id start_height, const block_cache_value& value);
+    expect<void> erase_block_cache(block_id start_height);
 
     //! Bump the last access time of `address` to the current time.
     expect<void> update_access_time(account_address const& address) noexcept;

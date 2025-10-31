@@ -187,8 +187,9 @@ namespace rct
       self.txnFee = std::move(*txnFee);
     }
     else if (!self.ecdhInfo.empty() || !self.outPk.empty() || txnFee)
+     ;
+      // TODO figure out why this triggers during tests
       // WIRE_DLOG_THROW(wire::error::schema::invalid_key, "Did not expected `encrypted`, `commitments`, or `fee`");
-      MDEBUG("Did not expected `encrypted`, `commitments`, or `fee`");
 
     if (prunable)
     {

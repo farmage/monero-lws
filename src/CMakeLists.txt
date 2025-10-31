@@ -95,6 +95,14 @@ set(monero-lws-common_headers config.h error.h fwd.h)
 add_library(monero-lws-common ${monero-lws-common_sources} ${monero-lws-common_headers})
 target_link_libraries(monero-lws-common monero::libraries)
 
+add_library(monero-lws-cache block_cache.cpp)
+target_link_libraries(monero-lws-cache
+  PUBLIC
+    monero::libraries
+    monero-lws-db
+    monero-lws-rpc
+    monero-lws-wire-json)
+
 add_library(monero-lws-daemon-common rest_server.cpp scanner.cpp)
 target_include_directories(monero-lws-daemon-common PUBLIC ${ZMQ_INCLUDE_PATH})
 target_link_libraries(monero-lws-daemon-common
@@ -108,6 +116,7 @@ target_link_libraries(monero-lws-daemon-common
     monero-lws-rpc-scanner
     monero-lws-wire-json
     monero-lws-util
+    monero-lws-cache
     ${Boost_CHRONO_LIBRARY}
     ${Boost_COROUTINE_LIBRARY}
     ${Boost_CONTEXT_LIBRARY}
@@ -139,6 +148,9 @@ target_link_libraries(monero-lws-admin
     monero-lws-db
     monero-lws-rpc
     monero-lws-wire-json
+    monero-lws-net
+    monero-lws-cache
+    ${ZMQ_LIB}
     ${Boost_PROGRAM_OPTIONS_LIBRARY}
     Threads::Threads
 )
